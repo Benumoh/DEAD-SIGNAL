@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111513">
+    <meta name="description" content="A third-person zombie-survival driving game. Find the survivor. Get out alive.">
+    <title>DEAD SIGNAL — Rescue Run</title>
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./css/styles.css">
+  </head>
+  <body>
+    <main id="game-shell">
+      <canvas id="game" aria-label="DEAD SIGNAL 3D game world"></canvas>
+
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Dead Signal home">
+          <span class="brand-mark" aria-hidden="true">DS</span>
+          <span><strong>DEAD SIGNAL</strong><small>RESCUE RUN // 01</small></span>
+        </a>
+        <div class="identity" id="identity-card" aria-live="polite">
+          <span class="identity-status" id="identity-status">CONNECTING</span>
+          <img id="player-face" alt="" hidden>
+          <span class="identity-copy"><strong id="player-name">Survivor</strong><small id="player-account">LOCAL RUN</small></span>
+          <a id="sign-in" class="sign-in" hidden>Sign in</a>
+        </div>
+      </header>
+
+      <section class="mission-panel" aria-live="polite">
+        <p class="eyebrow">CURRENT OBJECTIVE</p>
+        <h1 id="objective">Reach the service station.</h1>
+        <p class="location"><span class="live-dot"></span> COUNTY ROAD 09 <span id="mission-clock">00:00</span></p>
+      </section>
+
+      <aside class="status-panel">
+        <div class="health-row"><span>CONDITION</span><strong id="health-value">100%</strong></div>
+        <div class="health-track"><span id="health-bar"></span></div>
+        <div class="status-meta">
+          <span id="vehicle-state">ON FOOT</span>
+          <strong id="speed-value">0 <small>MPH</small></strong>
+        </div>
+      </aside>
+
+      <div class="prompt" id="interaction-prompt" hidden></div>
+
+      <section class="radio" id="radio" aria-live="polite">
+        <div class="radio-label"><span class="radio-wave"></span> EMERGENCY BAND // 91.7</div>
+        <p id="radio-line">“...anyone on this frequency, keep your headlights low.”</p>
+      </section>
+
+      <aside class="controls-hint" id="controls-hint">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> MOVE / DRIVE</span>
+        <span><kbd>SHIFT</kbd> RUN</span>
+        <span><kbd>E</kbd> INTERACT</span>
+        <span>RIGHT-DRAG LOOK</span>
+      </aside>
+
+      <button class="board-button" id="leaderboard-button" type="button">FIELD RECORDS</button>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <section class="screen" id="end-screen" hidden>
+        <div class="screen-card">
+          <p class="eyebrow" id="end-kicker">SIGNAL RESTORED</p>
+          <h2 id="end-title">YOU MADE IT OUT.</h2>
+          <p id="end-message">The survivor is safe. For tonight, that's enough.</p>
+          <p class="final-score" id="final-score"></p>
+          <button id="restart-button" type="button">RUN IT AGAIN</button>
+        </div>
+      </section>
+
+      <section class="screen" id="leaderboard-screen" hidden>
+        <div class="screen-card leaderboard-card">
+          <button class="close-button" id="close-leaderboard" type="button" aria-label="Close field records">×</button>
+          <p class="eyebrow">START.NG // GLOBAL</p>
+          <h2>FIELD RECORDS</h2>
+          <p class="board-note" id="board-note">Loading live platform scores…</p>
+          <ol id="leaderboard-list"></ol>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>

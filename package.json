@@ -1,0 +1,13 @@
+{
+  "name": "dead-signal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node scripts/serve.js"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  }
+}
