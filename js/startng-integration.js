@@ -8,7 +8,7 @@ export class StartNgIntegration {
     this.framePromise = null;
     this.player = null;
     this.authenticated = false;
-    this.scoreSubmitted = false;
+    this.submittedRunIds = new Set();
     this.connected = false;
     this.gameName = location.hostname.endsWith('.start.ng')
       ? location.hostname.slice(0, -'.start.ng'.length)
@@ -98,24 +98,35 @@ export class StartNgIntegration {
     }
   }
 
-  async submitScore(score) {
-    if (this.scoreSubmitted) return;
-    this.scoreSubmitted = true;
+  async submitScore(score, runId) {
+    if (this.submittedRunIds.has(runId)) return false;
+    this.submittedRunIds.add(runId);
     if (!this.gameName || !this.connected || !this.authenticated) {
-      this.ui.showToast('Run complete. Sign in on start.ng to save a global score.');
-      return;
+      const message = 'Not submitted: sign in on start.ng to save a global score.';
+      this.ui.setScoreSubmission('unavailable', message, runId);
+      this.ui.showToast(message, runId);
+      return false;
     }
+    this.ui.setScoreSubmission('pending', 'Submitting to start.ng…', runId);
     try {
       const reply = await this._ask({ type: 'startng:score', score }, 'startng:scoreSaved');
-      if (!reply?.ok) {
-        this.ui.showToast('Your run finished, but start.ng did not save the score.');
-        return;
+      if (reply?.ok !== true) {
+        const message = 'Not confirmed: start.ng did not confirm this score.';
+        this.ui.setScoreSubmission('failed', message, runId);
+        this.ui.showToast(message, runId);
+        return false;
       }
       const rank = Number.isInteger(reply.result?.rank) ? ` // FIELD RANK #${reply.result.rank}` : '';
-      this.ui.showToast(`Score recorded${rank}.`);
+      const message = `Recorded on start.ng${rank}.`;
+      this.ui.setScoreSubmission('success', message, runId);
+      this.ui.showToast(message, runId);
+      return true;
     } catch (error) {
       console.error('start.ng score submission failed:', error);
-      this.ui.showToast('Your run finished, but the score could not reach start.ng.');
+      const message = 'Not confirmed: the score could not be confirmed by start.ng.';
+      this.ui.setScoreSubmission('failed', message, runId);
+      this.ui.showToast(message, runId);
+      return false;
     }
   }
 

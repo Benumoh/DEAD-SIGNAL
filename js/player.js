@@ -12,16 +12,22 @@ export class Player {
   constructor(style = null) {
     this.group = new THREE.Group();
     this.group.name = 'start.ng survivor character';
+    this.style = style;
     this.speed = 4.2;
     this.sprintSpeed = 7.2;
     this.yaw = 0;
     this.health = 100;
     this.invulnerable = 0;
     this.moving = false;
+    this.walkPhase = 0;
+    this.legs = [];
+    this.arms = [];
     this._build(style);
   }
 
   _build(style) {
+    this.legs = [];
+    this.arms = [];
     const shirt = material(safeColor(style?.primaryColor, '#657466'));
     const trousers = material(safeColor(style?.secondaryColor, '#353d3a'));
     const skin = material(safeColor(style?.skinColor, '#bd8d70'));
@@ -38,21 +44,26 @@ export class Player {
     head.castShadow = true;
     this.group.add(head);
 
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.52, 0.31), trousers);
-    legs.position.y = 0.38;
-    legs.castShadow = true;
-    this.group.add(legs);
-
     for (const side of [-1, 1]) {
       const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.45, 3, 6), shirt);
       arm.position.set(side * 0.48, 1.03, 0);
       arm.rotation.z = side * -0.12;
       arm.castShadow = true;
       this.group.add(arm);
+      this.arms.push(arm);
+
+      const leg = new THREE.Group();
+      leg.position.set(side * 0.17, 0.66, 0);
+      const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.4, 3, 6), trousers);
+      shin.position.y = -0.25;
+      shin.castShadow = true;
+      leg.add(shin);
       const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.14, 0.36), boot);
-      shoe.position.set(side * 0.16, 0.08, -0.03);
+      shoe.position.set(0, -0.55, -0.03);
       shoe.castShadow = true;
-      this.group.add(shoe);
+      leg.add(shoe);
+      this.group.add(leg);
+      this.legs.push(leg);
     }
 
     const hairStyle = style?.hair;
@@ -148,8 +159,22 @@ export class Player {
   }
 
   setStyle(style) {
+    this.style = style;
     this.group.clear();
     this._build(style);
+  }
+
+  reset(position) {
+    this.group.position.copy(position);
+    this.group.rotation.set(0, 0, 0);
+    this.group.visible = true;
+    this.yaw = 0;
+    this.health = 100;
+    this.invulnerable = 0;
+    this.moving = false;
+    this.walkPhase = 0;
+    for (const leg of this.legs) leg.rotation.x = 0;
+    for (const arm of this.arms) arm.rotation.x = 0;
   }
 
   update(delta, keys, cameraYaw, resolveCollision) {
@@ -174,6 +199,13 @@ export class Player {
     }
 
     this.invulnerable = Math.max(0, this.invulnerable - delta);
+    const gait = this.moving ? Math.sin(this.walkPhase += delta * 10) : 0;
+    for (let index = 0; index < this.legs.length; index += 1) {
+      this.legs[index].rotation.x = gait * (index === 0 ? 0.42 : -0.42);
+    }
+    for (let index = 0; index < this.arms.length; index += 1) {
+      this.arms[index].rotation.x = gait * (index === 0 ? -0.18 : 0.18);
+    }
     this.group.rotation.y = this.yaw;
     this.group.visible = this.invulnerable <= 0 || Math.floor(this.invulnerable * 12) % 2 === 0;
   }

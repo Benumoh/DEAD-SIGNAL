@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#111513">
-    <meta name="description" content="A third-person zombie-survival driving game. Find the survivor. Get out alive.">
-    <title>DEAD SIGNAL — Rescue Run</title>
+    <meta name="description" content="A third-person zombie-survival campaign. Rescue the survivor or investigate the blackout tunnel.">
+    <title>DEAD SIGNAL — Survival Campaign</title>
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="./css/styles.css">
   </head>
@@ -29,7 +29,7 @@
       <section class="mission-panel" aria-live="polite">
         <p class="eyebrow">CURRENT OBJECTIVE</p>
         <h1 id="objective">Reach the service station.</h1>
-        <p class="location"><span class="live-dot"></span> COUNTY ROAD 09 <span id="mission-clock">00:00</span></p>
+        <p class="location"><span class="live-dot"></span> <span id="mission-location">COUNTY ROAD 09</span> <span id="mission-clock">00:00</span></p>
       </section>
 
       <aside class="status-panel">
@@ -58,13 +58,33 @@
       <button class="board-button" id="leaderboard-button" type="button">FIELD RECORDS</button>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+      <section class="screen" id="menu-screen">
+        <div class="screen-card menu-card">
+          <p class="eyebrow">COUNTY ROAD // FIELD OPERATIONS</p>
+          <h2>DEAD SIGNAL</h2>
+          <p>Choose a run. Find the survivor or follow the signal into the blackout tunnel.</p>
+          <button id="start-button" type="button">START MISSION</button>
+          <button class="menu-secondary" id="mission-2-button" type="button">MISSION 2 // THE BLACKOUT TUNNEL</button>
+        </div>
+      </section>
+
       <section class="screen" id="end-screen" hidden>
-        <div class="screen-card">
-          <p class="eyebrow" id="end-kicker">SIGNAL RESTORED</p>
+        <div class="screen-card debrief-card">
+          <p class="eyebrow" id="end-kicker">MISSION DEBRIEF</p>
           <h2 id="end-title">YOU MADE IT OUT.</h2>
           <p id="end-message">The survivor is safe. For tonight, that's enough.</p>
-          <p class="final-score" id="final-score"></p>
-          <button id="restart-button" type="button">RUN IT AGAIN</button>
+          <dl class="debrief-stats" id="debrief-stats">
+            <div><dt>MISSION</dt><dd id="debrief-mission"></dd></div>
+            <div><dt>FINAL SCORE</dt><dd id="debrief-score"></dd></div>
+            <div><dt>COMPLETION TIME</dt><dd id="debrief-time"></dd></div>
+            <div><dt id="debrief-metric-label">SURVIVOR</dt><dd id="debrief-rescue"></dd></div>
+            <div class="grade-stat"><dt>GRADE</dt><dd id="debrief-grade"></dd></div>
+          </dl>
+          <p class="score-submit-status" id="score-submit-status" role="status" aria-live="polite"></p>
+          <div class="debrief-actions">
+            <button id="replay-button" type="button">REPLAY MISSION</button>
+            <button class="secondary-action" id="menu-button" type="button">RETURN TO MAIN MENU</button>
+          </div>
         </div>
       </section>
 

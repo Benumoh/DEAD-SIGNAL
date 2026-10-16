@@ -1,6 +1,6 @@
 import * as THREE from '../assets/vendor/three.module.js';
 import { Infected } from './infected.js';
-import { MissionController, MISSION_PHASES } from './missions.js';
+import { CampaignProgress, MISSION_IDS, MissionController, MISSION_PHASES } from './missions.js';
 import { Player } from './player.js';
 import { StartNgIntegration } from './startng-integration.js';
 import { UI } from './ui.js';
@@ -11,24 +11,87 @@ const WORLD = Object.freeze({
   survivor: new THREE.Vector3(-5.5, 0, -25.4),
   escape: new THREE.Vector3(0, 0, -91),
 });
+const START_PLAYER = new THREE.Vector3(2.8, 0, 13.2);
+const START_VEHICLE = new THREE.Vector3(0, 0, 10.1);
+const START_INFECTED = new THREE.Vector3(-14.2, 0, -44);
+// Pursuers wake only after the relay is investigated and start well behind it.
+const TUNNEL_INFECTED_STARTS = [new THREE.Vector3(-3.9, 0, -38), new THREE.Vector3(3.6, 0, -35)];
 
 const clamp = THREE.MathUtils.clamp;
+
+function createSurfaceTexture(kind) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = kind === 'road' ? 1024 : 512;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not create procedural surface textures.');
+  const road = kind === 'road';
+  context.fillStyle = road ? '#353936' : '#596157';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  let seed = road ? 0x2f64a1 : 0x7c348d;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  const speckleCount = road ? 18000 : 14000;
+  for (let index = 0; index < speckleCount; index += 1) {
+    const shade = Math.floor(random() * (road ? 34 : 38));
+    const alpha = 0.08 + random() * 0.2;
+    context.fillStyle = road
+      ? `rgba(${shade + 36},${shade + 39},${shade + 37},${alpha})`
+      : `rgba(${shade + 52},${shade + 62},${shade + 50},${alpha})`;
+    const size = road ? 1 + random() * 2 : 1 + random() * 3;
+    context.fillRect(random() * canvas.width, random() * canvas.height, size, size);
+  }
+
+  if (road) {
+    for (let index = 0; index < 13; index += 1) {
+      const x = 24 + random() * (canvas.width - 48);
+      const y = random() * canvas.height;
+      context.beginPath();
+      context.moveTo(x, y);
+      let crackX = x;
+      let crackY = y;
+      for (let segment = 0; segment < 5; segment += 1) {
+        crackX += (random() - 0.5) * 34;
+        crackY += 8 + random() * 26;
+        context.lineTo(crackX, crackY);
+      }
+      context.strokeStyle = 'rgba(15,18,16,0.38)';
+      context.lineWidth = 1 + random() * 2;
+      context.stroke();
+      if (index % 3 === 0) {
+        context.fillStyle = 'rgba(91,78,61,0.22)';
+        context.fillRect(x - 24, y - 8, 48 + random() * 30, 14 + random() * 8);
+      }
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 4;
+  texture.repeat.set(road ? 1 : 8, road ? 8 : 8);
+  return texture;
+}
 
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
     this.ui = new UI();
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#9ba09a');
-    this.scene.fog = new THREE.Fog('#a3a9a1', 32, 142);
+    this.scene.background = new THREE.Color('#87918a');
+    this.scene.fog = new THREE.Fog('#87918a', 24, 132);
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 180);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.16;
+    this.renderer.toneMappingExposure = 1.08;
 
     this.keys = new Set();
     this.driving = false;
@@ -36,23 +99,39 @@ export class Game {
     this.dragging = false;
     this.interactionRequested = false;
     this.elapsed = 0;
+    this.runActive = false;
+    this.runSequence = 0;
+    this.runId = null;
     this.radioIndex = 0;
     this.radioTimer = 0;
+    this.blackoutRemaining = 0;
     this.lastTimestamp = 0;
     this.disposed = false;
     this.collisionCircles = [];
+    this.relayPosition = new THREE.Vector3(-4.1, 0, -68);
 
     this._buildWorld();
+    this.campaignProgress = new CampaignProgress();
     this.player = new Player(null);
-    this.player.group.position.set(2.8, 0, 13.2);
+    this.player.group.position.copy(START_PLAYER);
     this.scene.add(this.player.group);
 
     this.vehicle = new Vehicle();
-    this.vehicle.position.set(0, 0, 10.1);
+    this.vehicle.position.copy(START_VEHICLE);
     this.scene.add(this.vehicle.group);
 
-    this.infected = new Infected(new THREE.Vector3(-14.2, 0, -44));
+    this.infected = new Infected(START_INFECTED);
     this.scene.add(this.infected.group);
+    this.tunnelInfected = [
+      new Infected(TUNNEL_INFECTED_STARTS[0], 1),
+      new Infected(TUNNEL_INFECTED_STARTS[1], 2),
+    ];
+    for (const infected of this.tunnelInfected) {
+      infected.active = false;
+      infected.aggroRange = 70;
+      infected.group.visible = false;
+      this.scene.add(infected.group);
+    }
     this._buildSurvivor();
     this._buildEscapeMarker();
 
@@ -67,6 +146,25 @@ export class Game {
           this.ui.showToast('Survivor rescued. Get back to the vehicle.');
         } else if (phase === MISSION_PHASES.REACH_ESCAPE) {
           this.ui.radio(3);
+        } else if (phase === MISSION_PHASES.ENTER_TUNNEL) {
+          this.ui.setRadioMessage('“The checkpoint is just beyond the tunnel. Keep moving.”');
+        } else if (phase === MISSION_PHASES.NAVIGATE_BLACKOUT) {
+          this.blackoutRemaining = 12;
+          this.ui.setRadioOutage(true);
+          this.ui.showToast('Signal lost. Follow the amber emergency lamps.');
+        } else if (phase === MISSION_PHASES.INVESTIGATE_RELAY) {
+          this.relayDevice.visible = true;
+          this.relayMarker.visible = true;
+          this.ui.setRadioOutage(false);
+          this.ui.setRadioMessage('“...military relay is repeating a recovery-network tag: NORTHSTAR.”');
+          this.ui.showToast('A relay is transmitting inside the tunnel.');
+        } else if (phase === MISSION_PHASES.ESCAPE_TUNNEL) {
+          this.ui.setRadioMessage('“Dispatch, you sent us into a dead zone. Signal source is confirmed. Get out!”');
+          this.ui.showToast('Relay clue secured. Infected closing in.');
+          for (const infected of this.tunnelInfected) {
+            infected.active = true;
+            infected.group.visible = true;
+          }
         }
       },
     });
@@ -82,22 +180,73 @@ export class Game {
     requestAnimationFrame(this._frame);
   }
 
+  _startMission(missionId = MISSION_IDS.RESCUE_RUN) {
+    this.selectedMissionId = missionId;
+    this.keys.clear();
+    this.dragging = false;
+    this.interactionRequested = false;
+    this.driving = false;
+    this.cameraYaw = 0;
+    this.elapsed = 0;
+    this.radioIndex = 0;
+    this.radioTimer = 0;
+    this.blackoutRemaining = 0;
+    this.runSequence += 1;
+    this.runId = `${missionId}-run-${this.runSequence}`;
+    this.player.reset(START_PLAYER);
+    this.vehicle.reset(START_VEHICLE);
+    this.infected.reset(START_INFECTED);
+    this.infected.active = missionId === MISSION_IDS.RESCUE_RUN;
+    this.infected.group.visible = this.infected.active;
+    for (const [index, infected] of this.tunnelInfected.entries()) {
+      infected.reset(TUNNEL_INFECTED_STARTS[index]);
+      infected.active = false;
+      infected.group.visible = false;
+    }
+    this.survivor.visible = true;
+    this.survivorMarker.visible = true;
+    this.survivorMarker.rotation.set(Math.PI / 2, 0, 0);
+    this.escapeMarker.rotation.set(Math.PI / 2, 0, 0);
+    const tunnelMission = missionId === MISSION_IDS.BLACKOUT_TUNNEL;
+    this.tunnelGroup.visible = tunnelMission;
+    this.survivor.visible = !tunnelMission;
+    this.survivorMarker.visible = !tunnelMission;
+    this.escapeMarker.visible = true;
+    this.relayDevice.visible = false;
+    this.relayMarker.visible = false;
+    this.ui.resetRun();
+    this.mission.reset(Date.now(), missionId);
+    if (tunnelMission) {
+      this.ui.setMissionLabel('BLACKOUT TUNNEL // 02');
+      this.ui.setMissionLocation('BLACKOUT TUNNEL');
+      this.ui.setRadioMessage('“Evacuation checkpoint beyond the old tunnel. Come in, survivor.”');
+    }
+    this.runActive = true;
+    this.lastTimestamp = performance.now();
+    this.ui.hideEnd();
+    this.ui.hideMenu();
+    this._placeCamera(1);
+  }
+
   _buildWorld() {
-    this.scene.add(new THREE.HemisphereLight('#d2d5c9', '#353c37', 2.1));
-    const sun = new THREE.DirectionalLight('#e4d7b7', 2.1);
+    this.scene.add(new THREE.HemisphereLight('#c5cbc2', '#303732', 1.65));
+    const sun = new THREE.DirectionalLight('#e4d5b4', 2.35);
     sun.position.set(-25, 42, 18);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -40;
-    sun.shadow.camera.right = 40;
-    sun.shadow.camera.top = 50;
-    sun.shadow.camera.bottom = -90;
+    sun.shadow.camera.left = -30;
+    sun.shadow.camera.right = 30;
+    sun.shadow.camera.top = 42;
+    sun.shadow.camera.bottom = -58;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 120;
     sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.025;
     this.scene.add(sun);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(180, 190),
-      new THREE.MeshStandardMaterial({ color: '#687269', roughness: 1 }),
+      new THREE.MeshStandardMaterial({ map: createSurfaceTexture('ground'), color: '#a2a99e', roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(0, -0.09, -27);
@@ -106,14 +255,14 @@ export class Game {
 
     const road = new THREE.Mesh(
       new THREE.PlaneGeometry(12, 150),
-      new THREE.MeshStandardMaterial({ color: '#343a38', roughness: 0.96 }),
+      new THREE.MeshStandardMaterial({ map: createSurfaceTexture('road'), color: '#c0c2b9', roughness: 1 }),
     );
     road.rotation.x = -Math.PI / 2;
     road.position.set(0, 0, -28);
     road.receiveShadow = true;
     this.scene.add(road);
 
-    const lineMat = new THREE.MeshStandardMaterial({ color: '#beb9a3', roughness: 0.9 });
+    const lineMat = new THREE.MeshStandardMaterial({ color: '#aaa58e', roughness: 1 });
     for (let z = 38; z > -101; z -= 13) {
       const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 5), lineMat);
       dash.rotation.x = -Math.PI / 2;
@@ -127,13 +276,116 @@ export class Game {
       this.scene.add(edge);
     }
 
-    const fogLight = new THREE.PointLight('#d5c99f', 26, 29, 2);
+    const shoulderMaterial = new THREE.MeshStandardMaterial({
+      map: createSurfaceTexture('ground'),
+      color: '#aaa993',
+      roughness: 1,
+    });
+    for (const x of [-7.1, 7.1]) {
+      const shoulder = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 150), shoulderMaterial);
+      shoulder.rotation.x = -Math.PI / 2;
+      shoulder.position.set(x, -0.005, -28);
+      shoulder.receiveShadow = true;
+      this.scene.add(shoulder);
+    }
+
+    const fogLight = new THREE.PointLight('#d5c99f', 18, 27, 2);
     fogLight.position.set(-9, 6, -30);
     this.scene.add(fogLight);
     this._buildStation();
     this._buildRoadside();
     this._buildAbandonedCar();
     this._buildBoundaryMarkers();
+    this._buildTunnel();
+  }
+
+  _buildTunnel() {
+    this.tunnelGroup = new THREE.Group();
+    const concrete = new THREE.MeshStandardMaterial({ color: '#343a36', roughness: 0.96 });
+    const stainedConcrete = new THREE.MeshStandardMaterial({ color: '#4b4c42', roughness: 0.94 });
+    const amber = new THREE.MeshStandardMaterial({
+      color: '#d99b55',
+      emissive: '#b96b22',
+      emissiveIntensity: 1.4,
+      roughness: 0.45,
+    });
+    const structure = [
+      [new THREE.BoxGeometry(0.75, 6.5, 64), -9.25, 3.25, -61],
+      [new THREE.BoxGeometry(0.75, 6.5, 64), 9.25, 3.25, -61],
+      [new THREE.BoxGeometry(19.2, 0.8, 64), 0, 6.65, -61],
+    ];
+    for (const [geometry, x, y, z] of structure) {
+      const wall = new THREE.Mesh(geometry, concrete);
+      wall.position.set(x, y, z);
+      wall.receiveShadow = true;
+      wall.castShadow = true;
+      this.tunnelGroup.add(wall);
+    }
+
+    for (const z of [-34, -47, -60, -73, -86]) {
+      const supports = [
+        [new THREE.BoxGeometry(0.42, 6.4, 0.48), -8.72, 3.2, z],
+        [new THREE.BoxGeometry(0.42, 6.4, 0.48), 8.72, 3.2, z],
+        [new THREE.BoxGeometry(17.8, 0.42, 0.48), 0, 6.15, z],
+      ];
+      for (const [geometry, x, y, depth] of supports) {
+        const support = new THREE.Mesh(geometry, stainedConcrete);
+        support.position.set(x, y, depth);
+        support.castShadow = true;
+        support.receiveShadow = true;
+        this.tunnelGroup.add(support);
+      }
+    }
+
+    for (const z of [-42, -55, -68, -81]) {
+      const housing = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.25, 1.5), concrete);
+      housing.position.set(0, 5.95, z);
+      this.tunnelGroup.add(housing);
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.7), amber);
+      lamp.position.set(0, 5.78, z);
+      this.tunnelGroup.add(lamp);
+      const light = new THREE.PointLight('#e5a45e', 2.8, 15, 2);
+      light.position.set(0, 5.45, z);
+      this.tunnelGroup.add(light);
+    }
+
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(5.2, 1.1, 0.16),
+      new THREE.MeshStandardMaterial({ color: '#34362e', emissive: '#65421f', emissiveIntensity: 0.55 }),
+    );
+    sign.position.set(0, 4.7, -33.1);
+    this.tunnelGroup.add(sign);
+    for (const x of [-8.4, 8.4]) {
+      const guide = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.16, 60), amber);
+      guide.position.set(x, 0.3, -61);
+      this.tunnelGroup.add(guide);
+    }
+
+    this.relayDevice = new THREE.Group();
+    this.relayDevice.position.copy(this.relayPosition);
+    const relayBody = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.4, 0.65), stainedConcrete);
+    relayBody.position.y = 0.8;
+    relayBody.castShadow = true;
+    this.relayDevice.add(relayBody);
+    const relayPanel = new THREE.Mesh(
+      new THREE.BoxGeometry(0.62, 0.36, 0.08),
+      new THREE.MeshStandardMaterial({ color: '#8c3830', emissive: '#b43c2d', emissiveIntensity: 1.1 }),
+    );
+    relayPanel.position.set(0, 1.05, -0.37);
+    this.relayDevice.add(relayPanel);
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.06, 1.45, 6), stainedConcrete);
+    antenna.position.set(0.25, 2.1, 0);
+    this.relayDevice.add(antenna);
+    this.tunnelGroup.add(this.relayDevice);
+    this.relayMarker = new THREE.Mesh(
+      new THREE.TorusGeometry(1.15, 0.055, 6, 24),
+      new THREE.MeshStandardMaterial({ color: '#d2e99a', emissive: '#829c47', emissiveIntensity: 0.8 }),
+    );
+    this.relayMarker.rotation.x = Math.PI / 2;
+    this.relayMarker.position.set(this.relayPosition.x, 0.08, this.relayPosition.z);
+    this.tunnelGroup.add(this.relayMarker);
+    this.tunnelGroup.visible = false;
+    this.scene.add(this.tunnelGroup);
   }
 
   _buildStation() {
@@ -229,33 +481,117 @@ export class Game {
         this.scene.add(post);
       }
     }
+
+    let seed = 0x517a2d;
+    const random = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+    const shrubMaterial = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1 });
+    const shrubs = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.72, 0), shrubMaterial, 170);
+    const debris = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.42, 0),
+      new THREE.MeshStandardMaterial({ color: '#79786d', roughness: 1 }),
+      95,
+    );
+    const transform = new THREE.Object3D();
+    const tint = new THREE.Color();
+    for (let index = 0; index < shrubs.count; index += 1) {
+      const side = random() < 0.5 ? -1 : 1;
+      const scale = 0.48 + random() * 0.82;
+      transform.position.set(side * (8.9 + random() * 3.5), scale * 0.55, 34 - random() * 133);
+      transform.rotation.set(0, random() * Math.PI, 0);
+      transform.scale.set(scale * (0.8 + random() * 0.5), scale, scale * (0.8 + random() * 0.5));
+      transform.updateMatrix();
+      shrubs.setMatrixAt(index, transform.matrix);
+      tint.setHSL(0.24 + random() * 0.07, 0.12 + random() * 0.16, 0.2 + random() * 0.1);
+      shrubs.setColorAt(index, tint);
+    }
+    for (let index = 0; index < debris.count; index += 1) {
+      const side = random() < 0.5 ? -1 : 1;
+      const scale = 0.25 + random() * 0.85;
+      transform.position.set(side * (6.5 + random() * 2.6), scale * 0.25, 34 - random() * 133);
+      transform.rotation.set(random() * 0.2, random() * Math.PI, random() * 0.18);
+      transform.scale.set(scale * 1.3, scale * 0.45, scale);
+      transform.updateMatrix();
+      debris.setMatrixAt(index, transform.matrix);
+    }
+    shrubs.castShadow = false;
+    shrubs.receiveShadow = false;
+    debris.castShadow = false;
+    debris.receiveShadow = false;
+    this.scene.add(shrubs, debris);
   }
 
   _buildAbandonedCar() {
-    const wreck = new THREE.Group();
-    wreck.position.set(10.8, 0, -7);
-    wreck.rotation.y = 0.42;
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 0.75, 4.3),
-      new THREE.MeshStandardMaterial({ color: '#525853', roughness: 0.95 }),
-    );
-    body.position.y = 0.75;
-    body.rotation.z = -0.07;
-    body.castShadow = true;
-    wreck.add(body);
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.7, 1.8),
-      new THREE.MeshStandardMaterial({ color: '#2f3532', roughness: 0.5 }),
-    );
-    cabin.position.set(0, 1.37, 0.25);
-    cabin.castShadow = true;
-    wreck.add(cabin);
-    this.scene.add(wreck);
-    this.collisionCircles.push({ x: 10.8, z: -7, radius: 2.5 });
+    const wrecks = [
+      { x: 10.8, z: -7, yaw: 0.42, color: '#525853', radius: 2.5 },
+      { x: -10.2, z: -66, yaw: -0.18, color: '#665b49', radius: 2.6 },
+    ];
+    const tireMaterial = new THREE.MeshStandardMaterial({ color: '#202320', roughness: 1 });
+    const glassMaterial = new THREE.MeshStandardMaterial({
+      color: '#252e2d',
+      roughness: 0.34,
+      metalness: 0.12,
+    });
+    for (const [index, location] of wrecks.entries()) {
+      const wreck = new THREE.Group();
+      wreck.position.set(location.x, 0, location.z);
+      wreck.rotation.y = location.yaw;
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(2.2, 0.75, 4.3),
+        new THREE.MeshStandardMaterial({ color: location.color, roughness: 0.94, metalness: 0.08 }),
+      );
+      body.position.y = 0.75;
+      body.rotation.z = index === 0 ? -0.07 : 0.035;
+      body.castShadow = true;
+      body.receiveShadow = true;
+      wreck.add(body);
+      const hood = new THREE.Mesh(
+        new THREE.BoxGeometry(2.05, 0.2, 1.1),
+        new THREE.MeshStandardMaterial({ color: '#484b43', roughness: 1 }),
+      );
+      hood.position.set(0, 1.2, -1.37);
+      hood.rotation.z = -0.08;
+      hood.castShadow = true;
+      wreck.add(hood);
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 1.8), glassMaterial);
+      cabin.position.set(0, 1.37, 0.25);
+      cabin.castShadow = true;
+      wreck.add(cabin);
 
-    const wreckLight = new THREE.PointLight('#ce7855', 7, 9, 2);
-    wreckLight.position.set(10.8, 0.8, -7);
-    this.scene.add(wreckLight);
+      const rust = new THREE.MeshStandardMaterial({ color: '#754738', roughness: 1 });
+      for (const side of [-1, 1]) {
+        const scrape = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.12, 0.75), rust);
+        scrape.position.set(side * 1.105, 0.8, index === 0 ? 0.28 : -0.35);
+        scrape.rotation.y = side * 0.06;
+        wreck.add(scrape);
+        const glassShard = new THREE.Mesh(
+          new THREE.BoxGeometry(0.42, 0.025, 0.31),
+          new THREE.MeshStandardMaterial({ color: '#707874', roughness: 0.26, metalness: 0.15 }),
+        );
+        glassShard.position.set(side * 0.42, 1.78, 0.22);
+        glassShard.rotation.z = side * 0.24;
+        wreck.add(glassShard);
+      }
+      for (const x of [-0.96, 0.96]) {
+        for (const z of [-1.32, 1.32]) {
+          if (index === 1 && x > 0 && z > 0) continue;
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.25, 10), tireMaterial);
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.set(x, 0.4, z);
+          wheel.castShadow = true;
+          wreck.add(wheel);
+        }
+      }
+      this.scene.add(wreck);
+      this.collisionCircles.push({ x: location.x, z: location.z, radius: location.radius });
+      if (index === 0) {
+        const wreckLight = new THREE.PointLight('#ce7855', 5, 8, 2);
+        wreckLight.position.set(location.x, 0.8, location.z);
+        this.scene.add(wreckLight);
+      }
+    }
   }
 
   _buildBoundaryMarkers() {
@@ -328,7 +664,30 @@ export class Game {
     this.canvas.addEventListener('pointerdown', this._onPointerDown);
     addEventListener('pointerup', this._onPointerUp);
     addEventListener('pointermove', this._onPointerMove);
-    document.getElementById('restart-button').addEventListener('click', () => location.reload());
+    document.getElementById('start-button').addEventListener('click', () => this._startMission());
+    document.getElementById('mission-2-button').addEventListener('click', () => this._startMission(MISSION_IDS.BLACKOUT_TUNNEL));
+    document.getElementById('replay-button').addEventListener('click', () => this._startMission(this.selectedMissionId));
+    document.getElementById('menu-button').addEventListener('click', () => {
+      this.runActive = false;
+      this.keys.clear();
+      this.driving = false;
+      this.elapsed = 0;
+      this.selectedMissionId = MISSION_IDS.RESCUE_RUN;
+      this.tunnelGroup.visible = false;
+      this.relayDevice.visible = false;
+      this.relayMarker.visible = false;
+      this.infected.active = false;
+      this.infected.group.visible = false;
+      for (const infected of this.tunnelInfected) {
+        infected.active = false;
+        infected.group.visible = false;
+      }
+      this.survivor.visible = true;
+      this.survivorMarker.visible = true;
+      this.ui.resetRun();
+      this.ui.hideEnd();
+      this.ui.showMenu();
+    });
     document.getElementById('leaderboard-button').addEventListener('click', () => this.platform.showLeaderboard());
     document.getElementById('close-leaderboard').addEventListener('click', () => this.ui.closeLeaderboard());
   }
@@ -398,6 +757,13 @@ export class Game {
     const playerPosition = this.player.position;
     const carDistance = playerPosition.distanceTo(this.vehicle.position);
     const survivorDistance = playerPosition.distanceTo(WORLD.survivor);
+    if (this.mission.phase === MISSION_PHASES.INVESTIGATE_RELAY
+      && playerPosition.distanceTo(this.relayPosition) < 3.2) {
+      this.mission.investigateRelay();
+      this.relayDevice.visible = false;
+      this.relayMarker.visible = false;
+      return;
+    }
     if (this.mission.phase === MISSION_PHASES.FIND_SURVIVOR && survivorDistance < 3.2) {
       if (this.mission.rescueSurvivor()) {
         this.survivor.visible = false;
@@ -452,7 +818,10 @@ export class Game {
       return;
     }
     const playerPosition = this.player.position;
-    if (this.mission.phase === MISSION_PHASES.FIND_SURVIVOR
+    if (this.mission.phase === MISSION_PHASES.INVESTIGATE_RELAY
+      && playerPosition.distanceTo(this.relayPosition) < 3.5) {
+      this.ui.setPrompt('Investigate relay');
+    } else if (this.mission.phase === MISSION_PHASES.FIND_SURVIVOR
       && playerPosition.distanceTo(WORLD.survivor) < 3.5) {
       this.ui.setPrompt('Rescue survivor');
     } else if (playerPosition.distanceTo(this.vehicle.position) < 4) {
@@ -462,20 +831,61 @@ export class Game {
     }
   }
 
-  _updateMission() {
+  _updateMission(delta) {
     if (this.mission.phase === MISSION_PHASES.REACH_STATION
       && this.vehicle.position.distanceTo(WORLD.station) < 12) {
       this.mission.reachStation();
     }
-    if (this.mission.phase === MISSION_PHASES.REACH_ESCAPE
-      && this.vehicle.position.distanceTo(WORLD.escape) < 4) {
-      const score = this.mission.reachEscape();
-      if (score !== null) {
-        this.ui.showEnd({ complete: true, score });
-        this.ui.setPrompt('');
-        this.platform.submitScore(score);
+    if (this.mission.missionId === MISSION_IDS.BLACKOUT_TUNNEL) {
+      const actorPosition = this.driving ? this.vehicle.position : this.player.position;
+      if (this.mission.phase === MISSION_PHASES.TRAVEL_TUNNEL && actorPosition.z < -28) {
+        this.mission.reachTunnelEntrance();
+      }
+      if (this.mission.phase === MISSION_PHASES.ENTER_TUNNEL && actorPosition.z < -39) {
+        this.mission.enterTunnel();
+      }
+      if (this.mission.phase === MISSION_PHASES.NAVIGATE_BLACKOUT) {
+        if (this.blackoutRemaining > 0) {
+          this.blackoutRemaining = Math.max(0, this.blackoutRemaining - delta);
+          if (this.blackoutRemaining === 0) {
+            this.ui.setRadioMessage('Carrier returning. The emergency lights lead deeper into the tunnel.');
+          }
+        }
+        if (actorPosition.distanceTo(this.relayPosition) < 7) {
+          this.mission.reachSignalDevice();
+        }
+      }
+      if (this.mission.phase === MISSION_PHASES.ESCAPE_TUNNEL && this.driving
+        && this.vehicle.position.distanceTo(WORLD.escape) < 4) {
+        const result = this.mission.reachTunnelExit(Date.now(), this.player.health);
+        if (result) this._completeMission(result);
       }
     }
+    if (this.mission.phase === MISSION_PHASES.REACH_ESCAPE
+      && this.vehicle.position.distanceTo(WORLD.escape) < 4) {
+      const result = this.mission.reachEscape(Date.now(), this.player.health);
+      if (result) this._completeMission(result);
+    }
+  }
+
+  _handleInfectedAttack(damage) {
+    if (!this.runActive || this.player.health <= 0 || !this.player.damage(damage)) return;
+    this.ui.setHealth(this.player.health);
+    this.ui.showToast('Infected attack. Keep moving.');
+    if (this.player.health <= 0 && this.mission.fail()) {
+      this.runActive = false;
+      this.ui.showEnd({ complete: false });
+      this.ui.setPrompt('');
+    }
+  }
+
+  _completeMission(result) {
+    this.campaignProgress.record(result);
+    this.runActive = false;
+    this.elapsed = result.elapsedSeconds;
+    this.ui.showEnd({ complete: true, result, runId: this.runId });
+    this.ui.setPrompt('');
+    this.platform.submitScore(result.score, this.runId);
   }
 
   _placeCamera(delta) {
@@ -496,14 +906,14 @@ export class Game {
     if (this.disposed) return;
     const delta = Math.min(0.04, (timestamp - this.lastTimestamp) / 1000);
     this.lastTimestamp = timestamp;
-    this.elapsed += delta;
-
     const terminal = this.mission.phase === MISSION_PHASES.COMPLETE || this.mission.phase === MISSION_PHASES.FAILED;
-    if (!terminal) {
+    if (this.runActive && !terminal) {
+      this.elapsed += delta;
       if (this.interactionRequested) this._interact();
       if (this.driving) {
         this.vehicle.update(delta, this.keys, (position) => this._resolveVehicleCollision(position));
         this.infected.update(delta, null, () => {});
+        for (const infected of this.tunnelInfected) infected.update(delta, null, () => {});
         if (this.infected.active
           && this.vehicle.position.distanceTo(this.infected.group.position) < 2.1
           && Math.abs(this.vehicle.velocity) > 3) {
@@ -512,19 +922,13 @@ export class Game {
         }
       } else {
         this.player.update(delta, this.keys, this.cameraYaw, (position) => this._resolveOnFootCollision(position));
-        this.infected.update(delta, this.player, (damage) => {
-          if (this.player.damage(damage)) {
-            this.ui.setHealth(this.player.health);
-            this.ui.showToast('Infected attack. Keep moving.');
-            if (this.player.health <= 0 && this.mission.fail()) {
-              this.ui.showEnd({ complete: false });
-              this.ui.setPrompt('');
-            }
-          }
-        });
+        this.infected.update(delta, this.player, (damage) => this._handleInfectedAttack(damage));
+        for (const infected of this.tunnelInfected) {
+          infected.update(delta, this.player, (damage) => this._handleInfectedAttack(damage));
+        }
       }
 
-      this._updateMission();
+      this._updateMission(delta);
       if (this.mission.phase === MISSION_PHASES.COMPLETE || this.mission.phase === MISSION_PHASES.FAILED) {
         this.ui.setPrompt('');
       } else {
@@ -536,12 +940,14 @@ export class Game {
     }
     this._placeCamera(delta);
     this.ui.setVehicleState(this.driving, this.driving ? this.vehicle.speedMph : 0);
-    this.ui.setTime(this.elapsed);
-    this.radioTimer += delta;
-    if (this.radioTimer > 38) {
-      this.radioTimer = 0;
-      this.radioIndex += 1;
-      this.ui.radio(this.radioIndex);
+    this.ui.setTime(this.runActive || terminal ? this.elapsed : 0);
+    if (this.runActive && this.mission.missionId === MISSION_IDS.RESCUE_RUN) {
+      this.radioTimer += delta;
+      if (this.radioTimer > 38) {
+        this.radioTimer = 0;
+        this.radioIndex += 1;
+        this.ui.radio(this.radioIndex);
+      }
     }
     this.survivorMarker.rotation.z += delta * 0.55;
     this.escapeMarker.rotation.z -= delta * 0.25;
@@ -555,6 +961,7 @@ export class Game {
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
     if (event.code === 'KeyE' && !event.repeat) this.interactionRequested = true;
     if (event.code === 'Escape' && !document.getElementById('leaderboard-screen').hidden) this.ui.closeLeaderboard();
+    if (!this.runActive) return;
     this.keys.add(event.code);
   };
 
@@ -565,12 +972,12 @@ export class Game {
   };
   _onContextMenu = (event) => event.preventDefault();
   _onPointerDown = (event) => {
-    if (event.button === 2) this.dragging = true;
+    if (this.runActive && event.button === 2) this.dragging = true;
   };
   _onPointerUp = () => {
     this.dragging = false;
   };
   _onPointerMove = (event) => {
-    if (this.dragging && !this.driving) this.cameraYaw -= event.movementX * 0.004;
+    if (this.runActive && this.dragging && !this.driving) this.cameraYaw -= event.movementX * 0.004;
   };
 }
