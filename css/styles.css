@@ -128,6 +128,13 @@ kbd { display: inline-block; min-width: 16px; margin-right: 2px; padding: 3px 4p
 .pause-button[hidden] { display: none; }
 .pause-button kbd { margin-left: 4px; font-size: 8px; color: inherit; }
 .pause-button:hover { background: #d2e99a; color: #151a14; }
+.sound-button {
+  position: absolute; z-index: 30; right: 28px; bottom: 108px; padding: 10px 13px;
+  color: var(--acid); background: rgba(15,20,18,.86); border: 1px solid rgba(196,220,134,.45);
+  font-size: 9px; letter-spacing: .12em; cursor: pointer;
+}
+.sound-button:hover, .sound-button:focus-visible { background: #d2e99a; color: #151a14; outline: none; }
+.sound-button[aria-pressed="true"] { color: #b7bcb1; }
 .pause-card { width: min(460px, 100%); }
 .countdown {
   position: absolute; z-index: 7; inset: 0; display: grid; place-content: center; justify-items: center;
@@ -247,6 +254,7 @@ body.touch-mode .nav-hint { display: none; }
 body.touch-mode .pause-button { top: 76px; right: 14px; bottom: auto; padding: 12px 14px; }
 body.touch-mode .pause-button kbd { display: none; }
 body.touch-mode .board-button { top: 124px; right: 14px; bottom: auto; padding: 12px 14px; }
+body.touch-mode .sound-button { top: 172px; right: 14px; bottom: auto; padding: 12px 14px; }
 body.touch-mode .screen-card button:not(.close-button), body.touch-mode .close-button { min-height: 44px; }
 body.touch-mode .radio { left: 168px; right: 190px; bottom: 16px; width: auto; max-width: 420px; }
 body.touch-mode .prompt { top: 58%; }
@@ -257,6 +265,7 @@ body.touch-mode .prompt { top: 58%; }
 @media (max-width: 700px) and (min-height: 521px) {
   body.touch-mode .pause-button { top: 205px; right: 14px; }
   body.touch-mode .board-button { top: 253px; right: 14px; }
+  body.touch-mode .sound-button { top: 301px; right: 14px; }
 }
 @media (max-height: 520px) {
   html, body, #game-shell { min-height: 0; }
@@ -267,6 +276,7 @@ body.touch-mode .prompt { top: 58%; }
   .status-panel { top: 126px !important; padding: 7px 10px !important; }
   body.touch-mode .pause-button { top: 10px; right: 150px; padding: 10px 12px; }
   body.touch-mode .board-button { top: 10px; right: 240px; padding: 10px 12px; }
+  body.touch-mode .sound-button { top: 10px; right: 345px; padding: 10px 12px; }
   body.touch-mode .touch-stick { width: 112px; height: 112px; bottom: 16px; }
   body.touch-mode .touch-actions { bottom: 16px; grid-template-columns: repeat(2, 60px); gap: 8px; }
   body.touch-mode .touch-actions button { width: 60px; height: 60px; }

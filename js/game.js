@@ -1,6 +1,9 @@
 import * as THREE from '../assets/vendor/three.module.js';
+import { GameAudio } from './audio.js';
 import { Infected } from './infected.js';
 import { FIELD_INFECTED_POOL, FIELD_MISSIONS, infectedSettingsFor, stageTargets } from './field-missions.js';
+import { buildRoadLayout } from './road-builder.js';
+import { footLimit, layoutForMission, ROAD_LAYOUTS, roadCenter, vehicleLimit } from './roads.js';
 import {
   CAMPAIGN_MISSIONS,
   CampaignProgress,
@@ -89,6 +92,8 @@ export class Game {
   constructor(canvas) {
     this.canvas = canvas;
     this.ui = new UI();
+    this.audio = new GameAudio();
+    this.lastCountdownTick = 0;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#87918a');
     this.scene.fog = new THREE.Fog('#87918a', 24, 132);
@@ -150,6 +155,7 @@ export class Game {
     this.mission = new MissionController({
       onChange: (phase, objective) => {
         this.ui.setObjective(objective);
+        if (this.runActive && phase !== MISSION_PHASES.COMPLETE && phase !== MISSION_PHASES.FAILED) this.audio.chime();
         if (phase === MISSION_PHASES.FIND_SURVIVOR) {
           this.ui.radio(1);
           this.ui.showToast('Service station reached. Find the survivor.');
@@ -214,6 +220,7 @@ export class Game {
     this.selectedMissionId = missionId;
     this.paused = false;
     this.resumeCountdown = 0;
+    this.audio.setDucked(false);
     this.ui.hidePause();
     this.ui.hideCountdown();
     this.keys.clear();
@@ -243,6 +250,7 @@ export class Game {
     this.escapeMarker.rotation.set(Math.PI / 2, 0, 0);
     const tunnelMission = missionId === MISSION_IDS.BLACKOUT_TUNNEL;
     const field = FIELD_MISSIONS[missionId] ?? null;
+    this._applyRoadLayout(layoutForMission(missionId));
     this.tunnelGroup.visible = tunnelMission;
     this.survivor.visible = !tunnelMission && !field;
     this.survivorMarker.visible = !tunnelMission && !field;
@@ -298,7 +306,11 @@ export class Game {
     ground.position.set(0, -0.09, -27);
     ground.receiveShadow = true;
     this.scene.add(ground);
-
+    this.ground = ground;
+    this.roadTextures = { road: createSurfaceTexture('road'), ground: createSurfaceTexture('ground') };
+    this.roadLayouts = new Map();
+    this.roadLayout = ROAD_LAYOUTS.county;
+    const countyStart = this.scene.children.length;
     const road = new THREE.Mesh(
       new THREE.PlaneGeometry(12, 150),
       new THREE.MeshStandardMaterial({ map: createSurfaceTexture('road'), color: '#c0c2b9', roughness: 1 }),
@@ -342,7 +354,28 @@ export class Game {
     this._buildRoadside();
     this._buildAbandonedCar();
     this._buildBoundaryMarkers();
+    this.countyGroup = new THREE.Group();
+    this.countyGroup.add(...this.scene.children.slice(countyStart));
+    this.scene.add(this.countyGroup);
     this._buildTunnel();
+  }
+
+  _applyRoadLayout(layout) {
+    this.roadLayout = layout;
+    const county = layout.id === 'county';
+    this.countyGroup.visible = county;
+    for (const [id, group] of this.roadLayouts) group.visible = id === layout.id;
+    if (!county && !this.roadLayouts.has(layout.id)) {
+      const group = buildRoadLayout(layout, this.roadTextures);
+      this.roadLayouts.set(layout.id, group);
+      this.scene.add(group);
+    }
+    this.ground.material.color.set(layout.groundColor);
+    this.audio.setMood(layout.id);
+  }
+
+  _roadX(z) {
+    return roadCenter(this.roadLayout, z);
   }
 
   _buildTunnel() {
@@ -760,7 +793,7 @@ export class Game {
       const infected = this.fieldInfected[this.fieldSpawnCursor];
       if (!infected) return;
       this.fieldSpawnCursor += 1;
-      infected.reset(new THREE.Vector3(x, 0, z));
+      infected.reset(new THREE.Vector3(x + this._roadX(z), 0, z));
       infected.speed = this.fieldSettings.speed;
       infected.aggroRange = this.fieldSettings.aggroRange;
       infected.active = true;
@@ -775,7 +808,7 @@ export class Game {
     const campaign = CAMPAIGN_MISSIONS.find((entry) => entry.launchId === this.mission.missionId);
     this.fieldSettings = infectedSettingsFor(campaign?.difficulty);
     this.fieldTimer = stage.type === 'survive' ? stage.seconds : 0;
-    this.fieldTargets = stageTargets(stage).map(([x, z]) => new THREE.Vector3(x, 0, z));
+    this.fieldTargets = stageTargets(stage).map(([x, z]) => new THREE.Vector3(x + this._roadX(z), 0, z));
     this.fieldMarkers.forEach((marker, index) => {
       const target = this.fieldTargets[index];
       marker.visible = Boolean(target) && stage.type !== 'survive';
@@ -828,6 +861,7 @@ export class Game {
     if (index === null) return false;
     if (stage.type === 'collect') {
       this.fieldMarkers[index].visible = false;
+      this.audio.pickup();
       if (this.mission.fieldProgress(this.mission.stageIndex)) this._finishFieldStage();
       return true;
     }
@@ -864,6 +898,9 @@ export class Game {
     this.escapeBeam.visible = true;
     this._resetFieldAssets();
     this._setAtmosphere();
+    this._applyRoadLayout(ROAD_LAYOUTS.county);
+    this.audio.setMood('menu');
+    this.audio.setDucked(false);
     this.ui.resetRun();
     this.ui.hideEnd();
     this.ui.hidePause();
@@ -879,6 +916,7 @@ export class Game {
     this.keys.clear();
     this.dragging = false;
     this.interactionRequested = false;
+    this.audio.setDucked(true);
     this.ui.showPause();
   }
 
@@ -901,6 +939,7 @@ export class Game {
     this.mission.startedAt += Date.now() - this.pauseStartedAt;
     this.paused = false;
     this.resumeCountdown = 0;
+    this.audio.setDucked(false);
     this.ui.hideCountdown();
     this.ui.setPauseButtonVisible(true);
   }
@@ -916,6 +955,15 @@ export class Game {
     addEventListener('pointerup', this._onPointerUp);
     addEventListener('pointermove', this._onPointerMove);
     document.getElementById('start-button').addEventListener('click', () => this._openMissionSelection());
+    for (const type of ['pointerdown', 'keydown', 'touchstart']) {
+      addEventListener(type, () => this.audio.unlock(), { passive: true });
+    }
+    document.addEventListener('click', (event) => {
+      if (event.target.closest?.('button') && event.target.id !== 'sound-button') this.audio.click();
+    });
+    this.soundButton = document.getElementById('sound-button');
+    this._syncSoundButton();
+    this.soundButton.addEventListener('click', () => this._toggleSound());
     document.getElementById('replay-button').addEventListener('click', () => this._startMission(this.selectedMissionId));
     document.getElementById('menu-button').addEventListener('click', () => this._returnToMenu());
     document.getElementById('pause-menu-button').addEventListener('click', () => this._returnToMenu());
@@ -923,6 +971,17 @@ export class Game {
     document.getElementById('resume-button').addEventListener('click', () => this._beginResume());
     document.getElementById('leaderboard-button').addEventListener('click', () => this.platform.showLeaderboard());
     document.getElementById('close-leaderboard').addEventListener('click', () => this.ui.closeLeaderboard());
+  }
+
+  _toggleSound() {
+    this.audio.unlock();
+    this.audio.toggleMute();
+    this._syncSoundButton();
+  }
+
+  _syncSoundButton() {
+    this.soundButton.textContent = this.audio.muted ? 'SOUND OFF' : 'SOUND ON';
+    this.soundButton.setAttribute('aria-pressed', String(this.audio.muted));
   }
 
   _resize() {
@@ -934,9 +993,15 @@ export class Game {
   }
 
   _resolveOnFootCollision(position) {
-    position.x = clamp(position.x, -16, 16);
     position.z = clamp(position.z, -101, 37);
-    for (const circle of this.collisionCircles) {
+    if (this.roadLayout.id !== 'county') {
+      const center = this._roadX(position.z);
+      const limit = footLimit(this.roadLayout);
+      position.x = clamp(position.x, center - limit, center + limit);
+    } else {
+      position.x = clamp(position.x, -16, 16);
+    }
+    for (const circle of this.roadLayout.id === 'county' ? this.collisionCircles : []) {
       let dx = position.x - circle.x;
       let dz = position.z - circle.z;
       if (circle.length && Math.abs(dz) < circle.length / 2) {
@@ -965,7 +1030,11 @@ export class Game {
   }
 
   _resolveVehicleCollision(position) {
-    if (Math.abs(position.x) > 15.5 || position.z < -101 || position.z > 37) return true;
+    if (Math.abs(position.x) > 24 || position.z < -101 || position.z > 37) return true;
+    if (this.roadLayout.id !== 'county') {
+      return Math.abs(position.x - this._roadX(position.z)) > vehicleLimit(this.roadLayout);
+    }
+    if (Math.abs(position.x) > 15.5) return true;
     for (const circle of this.collisionCircles) {
       if (circle.length && Math.abs(position.z - circle.z) < circle.length / 2) {
         if (Math.abs(position.x - circle.x) < circle.radius + 1.1) return true;
@@ -1119,9 +1188,11 @@ export class Game {
   _handleInfectedAttack(damage) {
     if (!this.runActive || this.player.health <= 0 || !this.player.damage(damage)) return;
     this.ui.setHealth(this.player.health);
+    this.audio.hit();
     this.ui.showToast('Infected attack. Keep moving.');
     if (this.player.health <= 0 && this.mission.fail()) {
       this.runActive = false;
+      this.audio.fail();
       this.ui.showEnd({ complete: false });
       this.ui.setPrompt('');
     }
@@ -1145,6 +1216,7 @@ export class Game {
   _completeMission(result) {
     this.campaignProgress.record(result);
     this.runActive = false;
+    this.audio.success();
     this.elapsed = result.elapsedSeconds;
     this.ui.showEnd({
       complete: true,
@@ -1178,7 +1250,12 @@ export class Game {
     if (this.paused && this.resumeCountdown > 0) {
       this.resumeCountdown -= realDelta;
       if (this.resumeCountdown <= 0) this._finishResume();
-      else this.ui.showCountdown(Math.ceil(this.resumeCountdown));
+      else {
+        const tick = Math.ceil(this.resumeCountdown);
+        if (tick !== this.lastCountdownTick) this.audio.tick(tick === 1);
+        this.lastCountdownTick = tick;
+        this.ui.showCountdown(tick);
+      }
     }
     const terminal = this.mission.phase === MISSION_PHASES.COMPLETE || this.mission.phase === MISSION_PHASES.FAILED;
     if (this.runActive && !terminal && !this.paused) {
@@ -1194,6 +1271,7 @@ export class Game {
             && this.vehicle.position.distanceTo(infected.group.position) < 2.1
             && Math.abs(this.vehicle.velocity) > 3) {
             infected.escape();
+            this.audio.thump();
             this.ui.showToast('Infected neutralized.');
           }
         }
@@ -1201,6 +1279,7 @@ export class Game {
           && this.vehicle.position.distanceTo(this.infected.group.position) < 2.1
           && Math.abs(this.vehicle.velocity) > 3) {
           this.infected.escape();
+          this.audio.thump();
           this.ui.showToast('Infected neutralized.');
         }
       } else {
@@ -1238,6 +1317,20 @@ export class Game {
     this.survivorMarker.rotation.z += delta * 0.55;
     for (const marker of this.fieldMarkers) if (marker.visible) marker.rotation.y += delta * 0.8;
     this.escapeMarker.rotation.z -= delta * 0.25;
+    const actorPosition = this.driving ? this.vehicle.position : this.player.position;
+    let threatDistance = Infinity;
+    for (const infected of [this.infected, ...this.tunnelInfected, ...this.fieldInfected]) {
+      if (infected.active) threatDistance = Math.min(threatDistance, actorPosition.distanceTo(infected.group.position));
+    }
+    this.audio.update(realDelta, {
+      inRun: this.runActive && !terminal,
+      running: this.runActive && !terminal && !this.paused,
+      driving: this.driving,
+      speedMph: this.vehicle.speedMph,
+      moving: ['KeyW', 'KeyA', 'KeyS', 'KeyD'].some((code) => this.keys.has(code)),
+      sprinting: this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'),
+      threatDistance,
+    });
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(this._frame);
   };
@@ -1249,6 +1342,10 @@ export class Game {
     if (['Space', ...navigationKeys].includes(event.code)) event.preventDefault();
     if (!document.getElementById('leaderboard-screen').hidden) {
       if (event.code === 'Escape') this.ui.closeLeaderboard();
+      return;
+    }
+    if (event.code === 'KeyM' && !event.repeat) {
+      this._toggleSound();
       return;
     }
     if ((event.code === 'Escape' || event.code === 'KeyP') && !event.repeat) {

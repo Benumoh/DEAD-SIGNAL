@@ -66,6 +66,12 @@ The grade uses the final score: **S ≥ 1,650**, **A ≥ 1,500**, **B ≥ 1,400*
 
 Campaign completion IDs are saved in browser local storage and unlock the next campaign entry; run scores and debrief snapshots are not persisted locally. Local campaign progress is separate from start.ng identity and scores. Replaying a mission does not clear prior campaign completion.
 
+## Roads and sound
+
+Each mission uses one of nine road layouts (county, settlement, highway, bridge, ruins, forest, checkpoint, industrial, mountain) defined in `js/roads.js` and built by `js/road-builder.js`: curve, width, surface, markings, barriers and roadside props. The county layout and the Blackout Tunnel are unchanged.
+
+Audio is generated with the Web Audio API in `js/audio.js` (no audio files): ambient music per layout, engine, footsteps, infected growls, UI clicks and objective chimes. Sound starts after the first click or key press. Toggle it with the SOUND button or `M`; the choice is saved in `localStorage`.
+
 ## start.ng
 
 The game uses the documented hidden connect frame (`https://start.ng/connect`) with origin and source checks:
