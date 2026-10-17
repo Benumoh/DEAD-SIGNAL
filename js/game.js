@@ -1,5 +1,6 @@
 import * as THREE from '../assets/vendor/three.module.js';
 import { Infected } from './infected.js';
+import { FIELD_INFECTED_POOL, FIELD_MISSIONS, infectedSettingsFor, stageTargets } from './field-missions.js';
 import {
   CAMPAIGN_MISSIONS,
   CampaignProgress,
@@ -144,6 +145,7 @@ export class Game {
     }
     this._buildSurvivor();
     this._buildEscapeMarker();
+    this._buildFieldAssets();
 
     this.mission = new MissionController({
       onChange: (phase, objective) => {
@@ -196,10 +198,10 @@ export class Game {
       SPECIAL_OPERATIONS,
       this.campaignProgress,
       (mission) => {
-        this.selectedMissionId = mission.id;
+        this.selectedMissionId = mission.launchId ?? mission.id;
         this.ui.showMissionBriefing(
           mission,
-          () => this._startMission(mission.id),
+          () => this._startMission(mission.launchId ?? mission.id),
           () => this._openMissionSelection(),
         );
       },
@@ -207,7 +209,7 @@ export class Game {
   }
 
   _startMission(missionId) {
-    const playableMissionIds = [MISSION_IDS.RESCUE_RUN, MISSION_IDS.BLACKOUT_TUNNEL];
+    const playableMissionIds = [MISSION_IDS.RESCUE_RUN, MISSION_IDS.BLACKOUT_TUNNEL, ...Object.keys(FIELD_MISSIONS)];
     if (this.runActive || !playableMissionIds.includes(missionId)) return false;
     this.selectedMissionId = missionId;
     this.paused = false;
@@ -240,14 +242,25 @@ export class Game {
     this.survivorMarker.rotation.set(Math.PI / 2, 0, 0);
     this.escapeMarker.rotation.set(Math.PI / 2, 0, 0);
     const tunnelMission = missionId === MISSION_IDS.BLACKOUT_TUNNEL;
+    const field = FIELD_MISSIONS[missionId] ?? null;
     this.tunnelGroup.visible = tunnelMission;
-    this.survivor.visible = !tunnelMission;
-    this.survivorMarker.visible = !tunnelMission;
-    this.escapeMarker.visible = true;
+    this.survivor.visible = !tunnelMission && !field;
+    this.survivorMarker.visible = !tunnelMission && !field;
+    this.escapeMarker.visible = !field;
+    this.escapeBeam.visible = !field;
     this.relayDevice.visible = false;
     this.relayMarker.visible = false;
     this.ui.resetRun();
+    this._resetFieldAssets();
+    this._setAtmosphere(field?.atmosphere);
     this.mission.reset(Date.now(), missionId);
+    if (field) {
+      const campaign = CAMPAIGN_MISSIONS.find((entry) => entry.launchId === missionId);
+      this.ui.setMissionLabel(`${campaign.title.toUpperCase()} // ${String(campaign.number).padStart(2, '0')}`);
+      this.ui.setMissionLocation(campaign.environment.toUpperCase());
+      this.ui.setRadioMessage(field.radio);
+      this._applyFieldStage();
+    }
     if (tunnelMission) {
       this.ui.setMissionLabel('BLACKOUT TUNNEL // SPECIAL');
       this.ui.setMissionLocation('BLACKOUT TUNNEL');
@@ -685,7 +698,146 @@ export class Game {
       new THREE.MeshBasicMaterial({ color: '#c9d48c', transparent: true, opacity: 0.08, side: THREE.DoubleSide }),
     );
     beam.position.set(WORLD.escape.x, 5, WORLD.escape.z);
+    this.escapeBeam = beam;
     this.scene.add(beam);
+  }
+
+  _buildFieldAssets() {
+    this.fieldInfected = [];
+    for (let index = 0; index < FIELD_INFECTED_POOL; index += 1) {
+      const infected = new Infected(new THREE.Vector3(0, 0, 0), index % 3);
+      infected.active = false;
+      infected.group.visible = false;
+      this.scene.add(infected.group);
+      this.fieldInfected.push(infected);
+    }
+    this.fieldMarkers = [];
+    const ringGeometry = new THREE.TorusGeometry(1.4, 0.08, 6, 28);
+    const beamGeometry = new THREE.CylinderGeometry(0.05, 0.4, 8, 8, 1, true);
+    for (let index = 0; index < 4; index += 1) {
+      const marker = new THREE.Group();
+      const ring = new THREE.Mesh(ringGeometry, new THREE.MeshStandardMaterial({
+        color: '#d0da94', emissive: '#626d35', emissiveIntensity: 0.65,
+      }));
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.08;
+      const beam = new THREE.Mesh(beamGeometry, new THREE.MeshBasicMaterial({
+        color: '#c9d48c', transparent: true, opacity: 0.12, side: THREE.DoubleSide,
+      }));
+      beam.position.y = 4;
+      marker.add(ring, beam);
+      marker.visible = false;
+      this.scene.add(marker);
+      this.fieldMarkers.push(marker);
+    }
+    this.fieldSpawnCursor = 0;
+    this.fieldSettings = infectedSettingsFor();
+    this.fieldTargets = [];
+    this.fieldTimer = 0;
+  }
+
+  _setAtmosphere(atmosphere) {
+    const { background, near, far } = atmosphere ?? { background: '#87918a', near: 24, far: 132 };
+    this.scene.background.set(background);
+    this.scene.fog.color.set(background);
+    this.scene.fog.near = near;
+    this.scene.fog.far = far;
+  }
+
+  _resetFieldAssets() {
+    for (const infected of this.fieldInfected) {
+      infected.active = false;
+      infected.group.visible = false;
+    }
+    for (const marker of this.fieldMarkers) marker.visible = false;
+    this.fieldSpawnCursor = 0;
+    this.fieldTargets = [];
+    this.fieldTimer = 0;
+  }
+
+  _spawnFieldInfected(positions = []) {
+    for (const [x, z] of positions) {
+      const infected = this.fieldInfected[this.fieldSpawnCursor];
+      if (!infected) return;
+      this.fieldSpawnCursor += 1;
+      infected.reset(new THREE.Vector3(x, 0, z));
+      infected.speed = this.fieldSettings.speed;
+      infected.aggroRange = this.fieldSettings.aggroRange;
+      infected.active = true;
+      infected.group.visible = true;
+    }
+  }
+
+  // Sets up markers, spawns and radio for the mission's current stage.
+  _applyFieldStage() {
+    const stage = this.mission.fieldStage;
+    if (!stage) return;
+    const campaign = CAMPAIGN_MISSIONS.find((entry) => entry.launchId === this.mission.missionId);
+    this.fieldSettings = infectedSettingsFor(campaign?.difficulty);
+    this.fieldTimer = stage.type === 'survive' ? stage.seconds : 0;
+    this.fieldTargets = stageTargets(stage).map(([x, z]) => new THREE.Vector3(x, 0, z));
+    this.fieldMarkers.forEach((marker, index) => {
+      const target = this.fieldTargets[index];
+      marker.visible = Boolean(target) && stage.type !== 'survive';
+      if (target) marker.position.copy(target);
+    });
+    this._spawnFieldInfected(stage.spawn);
+    if (stage.radio) this.ui.setRadioMessage(stage.radio);
+    this.ui.showToast(stage.objective);
+  }
+
+  _finishFieldStage(choice = null) {
+    const index = this.mission.stageIndex;
+    const result = this.mission.completeFieldStage(index, Date.now(), this.player.health, choice);
+    if (result) this._completeMission(result);
+    else if (this.mission.stageIndex !== index) this._applyFieldStage();
+  }
+
+  _updateFieldMission(delta) {
+    const stage = this.mission.fieldStage;
+    if (!stage) return;
+    const actor = this.driving ? this.vehicle.position : this.player.position;
+    if (stage.type === 'reach') {
+      if (stage.vehicle && !this.driving) return;
+      if (actor.distanceTo(this.fieldTargets[0]) < stage.radius) this._finishFieldStage();
+    } else if (stage.type === 'escape') {
+      if (this.driving && this.vehicle.position.distanceTo(this.fieldTargets[0]) < stage.radius) this._finishFieldStage();
+    } else if (stage.type === 'survive') {
+      this.fieldTimer = Math.max(0, this.fieldTimer - delta);
+      this.ui.setObjective(`${stage.objective} (${Math.ceil(this.fieldTimer)}s)`);
+      if (this.fieldTimer === 0) this._finishFieldStage();
+    }
+  }
+
+  _nearestFieldTarget(position) {
+    let best = null;
+    let bestDistance = 3.2;
+    this.fieldTargets.forEach((target, index) => {
+      if (!this.fieldMarkers[index].visible) return;
+      const distance = position.distanceTo(target);
+      if (distance < bestDistance) {
+        best = index;
+        bestDistance = distance;
+      }
+    });
+    return best;
+  }
+
+  _interactField(stage, position) {
+    const index = this.fieldTargets.length ? this._nearestFieldTarget(position) : null;
+    if (index === null) return false;
+    if (stage.type === 'collect') {
+      this.fieldMarkers[index].visible = false;
+      if (this.mission.fieldProgress(this.mission.stageIndex)) this._finishFieldStage();
+      return true;
+    }
+    if (stage.type === 'choice') {
+      const option = stage.options[index];
+      this._spawnFieldInfected(option.spawn);
+      this._finishFieldStage(option.label);
+      return true;
+    }
+    return false;
   }
 
   _returnToMenu() {
@@ -708,6 +860,10 @@ export class Game {
     }
     this.survivor.visible = true;
     this.survivorMarker.visible = true;
+    this.escapeMarker.visible = true;
+    this.escapeBeam.visible = true;
+    this._resetFieldAssets();
+    this._setAtmosphere();
     this.ui.resetRun();
     this.ui.hideEnd();
     this.ui.hidePause();
@@ -832,6 +988,8 @@ export class Game {
     }
 
     const playerPosition = this.player.position;
+    const fieldStage = this.mission.fieldStage;
+    if (fieldStage && this._interactField(fieldStage, playerPosition)) return;
     const carDistance = playerPosition.distanceTo(this.vehicle.position);
     const survivorDistance = playerPosition.distanceTo(WORLD.survivor);
     if (this.mission.phase === MISSION_PHASES.INVESTIGATE_RELAY
@@ -895,6 +1053,15 @@ export class Game {
       return;
     }
     const playerPosition = this.player.position;
+    const fieldStage = this.mission.fieldStage;
+    if (fieldStage && this._nearestFieldTarget(playerPosition) !== null
+      && (fieldStage.type === 'collect' || fieldStage.type === 'choice')) {
+      const index = this._nearestFieldTarget(playerPosition);
+      this.ui.setPrompt(fieldStage.type === 'choice'
+        ? `${fieldStage.prompt}: ${fieldStage.options[index].label}`
+        : fieldStage.prompt);
+      return;
+    }
     if (this.mission.phase === MISSION_PHASES.INVESTIGATE_RELAY
       && playerPosition.distanceTo(this.relayPosition) < 3.5) {
       this.ui.setPrompt('Investigate relay');
@@ -909,6 +1076,10 @@ export class Game {
   }
 
   _updateMission(delta) {
+    if (this.mission.phase === MISSION_PHASES.FIELD) {
+      this._updateFieldMission(delta);
+      return;
+    }
     if (this.mission.phase === MISSION_PHASES.REACH_STATION
       && this.vehicle.position.distanceTo(WORLD.station) < 12) {
       this.mission.reachStation();
@@ -956,11 +1127,31 @@ export class Game {
     }
   }
 
+  _nextMissionHandler(result) {
+    const index = CAMPAIGN_MISSIONS.findIndex((entry) => entry.launchId === result.missionId);
+    const next = index >= 0 ? CAMPAIGN_MISSIONS[index + 1] : null;
+    if (!next || this.campaignProgress.stateFor(next.id) === 'locked') return null;
+    return () => {
+      this.ui.hideEnd();
+      this.selectedMissionId = next.launchId;
+      this.ui.showMissionBriefing(
+        next,
+        () => this._startMission(next.launchId),
+        () => this._returnToMenu(),
+      );
+    };
+  }
+
   _completeMission(result) {
     this.campaignProgress.record(result);
     this.runActive = false;
     this.elapsed = result.elapsedSeconds;
-    this.ui.showEnd({ complete: true, result, runId: this.runId });
+    this.ui.showEnd({
+      complete: true,
+      result,
+      runId: this.runId,
+      onNext: this._nextMissionHandler(result),
+    });
     this.ui.setPrompt('');
     this.platform.submitScore(result.score, this.runId);
   }
@@ -997,6 +1188,15 @@ export class Game {
         this.vehicle.update(delta, this.keys, (position) => this._resolveVehicleCollision(position));
         this.infected.update(delta, null, () => {});
         for (const infected of this.tunnelInfected) infected.update(delta, null, () => {});
+        for (const infected of this.fieldInfected) {
+          infected.update(delta, null, () => {});
+          if (infected.active
+            && this.vehicle.position.distanceTo(infected.group.position) < 2.1
+            && Math.abs(this.vehicle.velocity) > 3) {
+            infected.escape();
+            this.ui.showToast('Infected neutralized.');
+          }
+        }
         if (this.infected.active
           && this.vehicle.position.distanceTo(this.infected.group.position) < 2.1
           && Math.abs(this.vehicle.velocity) > 3) {
@@ -1007,6 +1207,9 @@ export class Game {
         this.player.update(delta, this.keys, this.cameraYaw, (position) => this._resolveOnFootCollision(position));
         this.infected.update(delta, this.player, (damage) => this._handleInfectedAttack(damage));
         for (const infected of this.tunnelInfected) {
+          infected.update(delta, this.player, (damage) => this._handleInfectedAttack(damage));
+        }
+        for (const infected of this.fieldInfected) {
           infected.update(delta, this.player, (damage) => this._handleInfectedAttack(damage));
         }
       }
@@ -1033,6 +1236,7 @@ export class Game {
       }
     }
     this.survivorMarker.rotation.z += delta * 0.55;
+    for (const marker of this.fieldMarkers) if (marker.visible) marker.rotation.y += delta * 0.8;
     this.escapeMarker.rotation.z -= delta * 0.25;
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(this._frame);

@@ -1,3 +1,5 @@
+import { FIELD_MISSIONS } from './field-missions.js';
+
 export const MISSION_IDS = Object.freeze({
   RESCUE_RUN: 'rescue-run-01',
   BLACKOUT_TUNNEL: 'blackout-tunnel',
@@ -39,7 +41,9 @@ export const CAMPAIGN_MISSIONS = Object.freeze(CAMPAIGN_MISSION_DATA.map((data, 
   description: data[4],
   objective: data[5],
   environment: data[6],
-  implemented: data[7] === true,
+  implemented: true,
+  // Campaign Mission 10 is played with the dedicated tunnel script.
+  launchId: data[0] === 'blackout-tunnel-10' ? MISSION_IDS.BLACKOUT_TUNNEL : data[0],
   prerequisites: Object.freeze(index === 0 ? [] : [missions[index - 1][0]]),
 })));
 
@@ -66,6 +70,7 @@ export const MISSION_PHASES = Object.freeze({
   NAVIGATE_BLACKOUT: 'navigate_blackout',
   INVESTIGATE_RELAY: 'investigate_relay',
   ESCAPE_TUNNEL: 'escape_tunnel',
+  FIELD: 'field',
   COMPLETE: 'complete',
   FAILED: 'failed',
 });
@@ -83,6 +88,17 @@ const MISSION_INFO = Object.freeze({
     objectiveLabel: 'SIGNAL DEVICE',
     objectiveReward: 250,
   }),
+  ...Object.fromEntries(CAMPAIGN_MISSIONS.filter((mission) => FIELD_MISSIONS[mission.id]).map((mission) => [
+    mission.id,
+    Object.freeze({
+      name: mission.title,
+      startPhase: MISSION_PHASES.FIELD,
+      objectiveLabel: 'OBJECTIVES',
+      objectiveReward: 200,
+      parSeconds: FIELD_MISSIONS[mission.id].parSeconds,
+      field: FIELD_MISSIONS[mission.id],
+    }),
+  ])),
 });
 
 const OBJECTIVES = Object.freeze({
@@ -112,8 +128,43 @@ export class MissionController {
     this.reset(startedAt, missionId);
   }
 
+  get fieldStage() {
+    const field = MISSION_INFO[this.missionId]?.field;
+    return this.phase === MISSION_PHASES.FIELD && field ? field.stages[this.stageIndex] ?? null : null;
+  }
+
   get objective() {
+    const stage = this.fieldStage;
+    if (stage) {
+      const needed = stage.points ? stage.points.length : 0;
+      return needed > 1 ? `${stage.objective} (${this.stageProgress}/${needed})` : stage.objective;
+    }
     return OBJECTIVES[this.phase];
+  }
+
+  // Returns true once the current collect stage has all its items.
+  fieldProgress(expectedIndex) {
+    const stage = this.fieldStage;
+    if (!stage || expectedIndex !== this.stageIndex) return false;
+    this.stageProgress += 1;
+    const done = this.stageProgress >= (stage.points ? stage.points.length : 1);
+    if (!done) this._notify();
+    return done;
+  }
+
+  // expectedIndex guards against duplicate triggers for the same stage.
+  completeFieldStage(expectedIndex, now = Date.now(), remainingHealth = 100, choice = null) {
+    const stage = this.fieldStage;
+    if (!stage || expectedIndex !== this.stageIndex) return null;
+    if (choice) this.choice = choice;
+    const field = MISSION_INFO[this.missionId].field;
+    if (this.stageIndex < field.stages.length - 1) {
+      this.stageIndex += 1;
+      this.stageProgress = 0;
+      this._notify();
+      return null;
+    }
+    return this._complete(now, remainingHealth);
   }
 
   reset(startedAt = Date.now(), missionId = this.missionId) {
@@ -126,6 +177,9 @@ export class MissionController {
     this.survivorRescued = false;
     this.clueFound = false;
     this.result = null;
+    this.stageIndex = 0;
+    this.stageProgress = 0;
+    this.choice = null;
     this._notify();
   }
 
@@ -176,13 +230,15 @@ export class MissionController {
     const missionInfo = MISSION_INFO[this.missionId];
     const elapsedSeconds = Math.max(0, Math.floor((now - this.startedAt) / 1000));
     const health = Math.max(0, Math.min(100, Number(remainingHealth) || 0));
-    const objectiveFound = this.missionId === MISSION_IDS.RESCUE_RUN
-      ? this.survivorRescued
-      : this.clueFound;
+    const isField = Boolean(missionInfo.field);
+    const objectiveFound = isField
+      ? true
+      : this.missionId === MISSION_IDS.RESCUE_RUN ? this.survivorRescued : this.clueFound;
+    const timeWindow = isField ? Math.min(300, missionInfo.parSeconds) : 300;
     const components = Object.freeze({
       missionCompletion: 1000,
       objectiveBonus: objectiveFound ? missionInfo.objectiveReward : 0,
-      completionTime: Math.max(0, 300 - elapsedSeconds),
+      completionTime: Math.max(0, timeWindow - elapsedSeconds),
       remainingHealth: Math.round(health * 2),
     });
     this.score = Object.values(components).reduce((total, points) => total + points, 0);
@@ -196,6 +252,8 @@ export class MissionController {
       survivorRescued: this.missionId === MISSION_IDS.RESCUE_RUN ? this.survivorRescued : null,
       clueFound: this.missionId === MISSION_IDS.BLACKOUT_TUNNEL ? this.clueFound : null,
       remainingHealth: health,
+      objectiveSummary: isField ? `${missionInfo.field.stages.length} of ${missionInfo.field.stages.length} objectives` : null,
+      choice: this.choice ?? null,
       components,
       grade: gradeForScore(this.score),
     });
@@ -243,7 +301,7 @@ export class CampaignProgress {
       throw new TypeError('Campaign results must be a completed, immutable mission result.');
     }
     this.results.set(result.missionId, result);
-    const campaignMission = CAMPAIGN_MISSIONS.find((mission) => mission.id === result.missionId);
+    const campaignMission = CAMPAIGN_MISSIONS.find((mission) => mission.launchId === result.missionId);
     if (campaignMission && !this.completedMissionIds.has(campaignMission.id)) {
       this.completedMissionIds.add(campaignMission.id);
       this._save();

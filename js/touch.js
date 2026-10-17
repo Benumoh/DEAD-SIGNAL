@@ -10,16 +10,14 @@ export class TouchControls {
     this.root = document.getElementById('touch-controls');
     this.stick = document.getElementById('touch-stick');
     this.knob = document.getElementById('touch-knob');
-    this.menuNav = document.getElementById('menu-nav');
+    this.stickKeys = new Set();
     this.stickPointer = null;
     this.lookPointer = null;
     this.lastLook = { x: 0, y: 0 };
-    this.stickKeys = new Set();
 
     this._bindStick();
     this._bindButtons();
     this._bindLook();
-    this._bindMenuNav();
     this._observeVisibility();
 
     const query = new URLSearchParams(location.search);
@@ -33,7 +31,6 @@ export class TouchControls {
     if (this.enabled) return;
     this.enabled = true;
     document.body.classList.add('touch-mode');
-    this._syncMenuNav();
   }
 
   reset() {
@@ -152,30 +149,10 @@ export class TouchControls {
     addEventListener('pointercancel', end);
   }
 
-  _bindMenuNav() {
-    for (const button of this.menuNav.querySelectorAll('[data-nav]')) {
-      button.addEventListener('pointerdown', (event) => event.preventDefault());
-      button.addEventListener('click', () => {
-        const code = button.dataset.nav;
-        if (code === 'Enter') this.game.ui.activateCurrent();
-        else dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true }));
-      });
-    }
-  }
-
   _observeVisibility() {
     const observer = new MutationObserver(() => {
-      this._syncMenuNav();
       if (this.root.hidden) this.reset();
     });
-    const watch = ['menu-screen', 'mission-selection-screen', 'mission-briefing-screen', 'pause-screen', 'end-screen', 'touch-controls']
-      .map((id) => document.getElementById(id));
-    for (const element of watch) observer.observe(element, { attributes: true, attributeFilter: ['hidden'] });
-  }
-
-  _syncMenuNav() {
-    const screenVisible = ['menu-screen', 'mission-selection-screen', 'mission-briefing-screen', 'pause-screen', 'end-screen']
-      .some((id) => !document.getElementById(id).hidden);
-    this.menuNav.hidden = !(this.enabled && screenVisible);
+    observer.observe(this.root, { attributes: true, attributeFilter: ['hidden'] });
   }
 }

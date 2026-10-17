@@ -68,15 +68,6 @@
         </div>
       </div>
 
-      <nav class="menu-nav" id="menu-nav" aria-label="Menu navigation" hidden>
-        <button type="button" tabindex="-1" data-nav="ArrowLeft" aria-label="Previous">◀</button>
-        <button type="button" tabindex="-1" data-nav="ArrowUp" aria-label="Up">▲</button>
-        <button type="button" tabindex="-1" data-nav="ArrowDown" aria-label="Down">▼</button>
-        <button type="button" tabindex="-1" data-nav="ArrowRight" aria-label="Next">▶</button>
-        <button type="button" tabindex="-1" data-nav="Enter" class="nav-ok">OK</button>
-        <button type="button" tabindex="-1" data-nav="Escape" class="nav-back">BACK</button>
-      </nav>
-
       <section class="screen" id="menu-screen">
         <div class="screen-card menu-card">
           <p class="eyebrow">A SURVIVAL CAMPAIGN</p>
@@ -97,7 +88,7 @@
             <p class="eyebrow">SPECIAL OPERATIONS</p>
             <div id="special-mission-list" class="mission-list"></div>
           </section>
-          <button class="secondary-action" id="selection-back-button" type="button">BACK TO TITLE</button>
+          <button class="secondary-action" id="selection-back-button" type="button">RETURN HOME</button>
         </div>
       </section>
 
@@ -150,6 +141,7 @@
           </dl>
           <p class="score-submit-status" id="score-submit-status" role="status" aria-live="polite"></p>
           <div class="debrief-actions">
+            <button id="next-mission-button" type="button" hidden>NEXT MISSION</button>
             <button id="replay-button" type="button">REPLAY MISSION</button>
             <button class="secondary-action" id="menu-button" type="button">RETURN TO MAIN MENU</button>
           </div>

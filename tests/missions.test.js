@@ -9,6 +9,7 @@ import {
   MISSION_PHASES,
   SPECIAL_OPERATIONS,
 } from '../js/missions.js';
+import { FIELD_MISSIONS } from '../js/field-missions.js';
 
 test('rescue run advances only through the required objective order', () => {
   const mission = new MissionController({ startedAt: 10_000 });
@@ -174,16 +175,16 @@ test('campaign completion persists locally and unlocks only the next mission', (
   campaign.record(rescue.reachEscape(10_000, 90));
 
   assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[0].id), 'completed');
-  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[1].id), 'unlocked');
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[1].id), 'available');
   assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[2].id), 'locked');
 
   const restored = new CampaignProgress(storage);
   assert.equal(restored.stateFor(CAMPAIGN_MISSIONS[0].id), 'completed');
-  assert.equal(restored.stateFor(CAMPAIGN_MISSIONS[1].id), 'unlocked');
+  assert.equal(restored.stateFor(CAMPAIGN_MISSIONS[1].id), 'available');
   assert.equal(restored.get(MISSION_IDS.RESCUE_RUN), null);
 });
 
-test('standalone mission completion does not unlock campaign missions', () => {
+test('the tunnel result completes campaign mission 10 and unlocks mission 11', () => {
   const campaign = new CampaignProgress(null);
   const tunnel = new MissionController({ startedAt: 0, missionId: MISSION_IDS.BLACKOUT_TUNNEL });
   tunnel.reachTunnelEntrance();
@@ -192,8 +193,46 @@ test('standalone mission completion does not unlock campaign missions', () => {
   tunnel.investigateRelay();
   campaign.record(tunnel.reachTunnelExit(10_000, 100));
 
-  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[1].id), 'locked');
+  assert.equal(campaign.stateFor('blackout-tunnel-10'), 'completed');
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[10].id), 'available');
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[9].id), 'completed');
 });
+
+test('every campaign mission is playable and field missions stay within the infected pool', () => {
+  for (const mission of CAMPAIGN_MISSIONS) {
+    assert.equal(mission.implemented, true);
+    if (mission.launchId !== MISSION_IDS.BLACKOUT_TUNNEL && mission.launchId !== MISSION_IDS.RESCUE_RUN) {
+      assert.ok(FIELD_MISSIONS[mission.launchId], mission.id);
+    }
+  }
+  assert.equal(Object.keys(FIELD_MISSIONS).length, 22);
+});
+
+test('field mission advances through stages, ignores duplicate triggers and scores against par', () => {
+  const id = 'last-fuel-stop-03';
+  const mission = new MissionController({ startedAt: 0, missionId: id });
+  const stages = FIELD_MISSIONS[id].stages;
+  assert.equal(mission.phase, MISSION_PHASES.FIELD);
+  assert.equal(mission.fieldProgress(0), false);
+  assert.equal(mission.fieldProgress(0), false);
+  assert.equal(mission.fieldProgress(0), true);
+  assert.equal(mission.completeFieldStage(0, 20_000, 100), null);
+  assert.equal(mission.stageIndex, 1);
+  assert.equal(mission.completeFieldStage(0, 20_000, 100), null);
+  assert.equal(mission.stageIndex, 1);
+  mission.completeFieldStage(1, 30_000, 100);
+  assert.equal(mission.stageIndex, stages.length - 1);
+  const result = mission.completeFieldStage(stages.length - 1, 60_000, 100);
+  assert.equal(result.components.completionTime, 180);
+  assert.equal(result.score, 1000 + 200 + 180 + 200);
+  assert.equal(mission.completeFieldStage(stages.length - 1, 61_000, 100), null);
+  assert.equal(mission.result.score, result.score);
+
+  mission.reset(100_000, id);
+  assert.equal(mission.stageIndex, 0);
+  assert.equal(mission.result, null);
+});
+
 
 test('replaying Blackout Tunnel resets its phases, clue and score snapshot', () => {
   const mission = new MissionController({ startedAt: 10_000, missionId: MISSION_IDS.BLACKOUT_TUNNEL });

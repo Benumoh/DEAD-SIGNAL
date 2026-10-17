@@ -146,12 +146,6 @@ export class UI {
     return true;
   }
 
-  // Used by on-screen OK: a tapped nav button may hold focus, so fall back to the last focused menu button.
-  activateCurrent() {
-    const target = document.activeElement?.closest('.screen button') ?? this.navCurrent;
-    if (target && !target.disabled && target.offsetParent !== null) target.click();
-  }
-
   _focusFirst(screenId, selector = 'button:not(:disabled)') {
     const target = byId(screenId).querySelector(selector);
     target?.focus({ preventScroll: true });
@@ -269,13 +263,18 @@ export class UI {
     return required ? `LOCKED // COMPLETE MISSION ${String(required).padStart(2, '0')}` : 'LOCKED';
   }
 
-  showEnd({ complete, result = null, runId = null }) {
+  showEnd({ complete, result = null, runId = null, onNext = null }) {
+    const nextButton = byId('next-mission-button');
+    nextButton.hidden = !(complete && onNext);
+    nextButton.onclick = onNext;
     byId('end-kicker').textContent = complete ? 'MISSION DEBRIEF' : 'SIGNAL LOST';
     byId('end-title').textContent = complete ? 'YOU MADE IT OUT.' : 'YOU DID NOT MAKE IT OUT.';
     byId('end-message').textContent = complete
       ? result?.missionId === 'blackout-tunnel'
         ? 'The relay carries a recovery-network tag. The evacuation message was bait.'
-        : 'The survivor is safe. For tonight, that is enough.'
+        : result?.missionId === 'rescue-run-01'
+          ? 'The survivor is safe. For tonight, that is enough.'
+          : 'Objectives complete. The signal is still out there.'
       : 'The emergency band goes quiet. Start a new run and try again.';
     byId('debrief-stats').hidden = !complete;
     byId('score-submit-status').hidden = !complete;
@@ -287,9 +286,15 @@ export class UI {
       byId('debrief-score').textContent = result.score.toLocaleString();
       byId('debrief-time').textContent = `${minutes}:${seconds}`;
       byId('debrief-metric-label').textContent = result.objectiveLabel;
-      byId('debrief-rescue').textContent = result.objectiveFound
-        ? result.missionId === 'blackout-tunnel' ? 'RECOVERED' : 'RESCUED'
-        : result.missionId === 'blackout-tunnel' ? 'NOT FOUND' : 'NOT RESCUED';
+      if (result.objectiveSummary) {
+        byId('debrief-rescue').textContent = result.choice
+          ? `${result.objectiveSummary} // ${result.choice.toUpperCase()}`
+          : result.objectiveSummary.toUpperCase();
+      } else {
+        byId('debrief-rescue').textContent = result.objectiveFound
+          ? result.missionId === 'blackout-tunnel' ? 'RECOVERED' : 'RESCUED'
+          : result.missionId === 'blackout-tunnel' ? 'NOT FOUND' : 'NOT RESCUED';
+      }
       byId('debrief-grade').textContent = result.grade;
       this.setScoreSubmission('pending', 'Score submission status pending…', runId);
     }

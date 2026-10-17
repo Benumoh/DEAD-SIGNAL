@@ -40,13 +40,15 @@ Touch mode turns on automatically on touch devices (and on the first touch, or w
 - **E / BRK / RUN buttons** — interact, brake, and toggle run
 - **One-finger drag** on the scene — rotate the on-foot camera
 - **PAUSE** button — pause; resuming uses the same 3-second countdown
-- **On-screen menu pad (◀ ▲ ▼ ▶ OK BACK)** on the title, selection, briefing, pause and debrief screens, mirroring the arrow keys, Enter and Esc
+- Menus and other screens are operated by tapping their buttons directly; no on-screen navigation pad is shown there
 
 Touch input feeds the same key set the keyboard uses (`js/touch.js`), so no gameplay code is duplicated.
 
 Select **START MISSION** to open the campaign list and briefing. Mission 1, **Rescue a Friend**, is the first playable campaign mission. The Rescue Run car starts near the survivor. Drive north along the marked highway to the service station, park, leave the vehicle and approach the survivor. Interact, return to the car and drive south to the marked escape point.
 
-The 24-mission campaign registry presents six chapters, mission briefings, objectives, locations, difficulty, and prerequisites. Only implemented campaign missions can be launched. Future campaign entries remain visibly locked or marked as in development. The already playable **Blackout Tunnel** is currently a standalone special operation; it is not counted as campaign Mission 2 or as campaign completion progress. Drive south to the tunnel entrance, follow its amber emergency lamps through the temporary radio outage, investigate the relay when its signal is located, then return to the vehicle and reach the far exit.
+The 24-mission campaign registry presents six chapters, mission briefings, objectives, locations, difficulty, and prerequisites. All 24 missions are playable and unlock in order. Missions 1 and 10 keep their dedicated scripts (Rescue Run and Blackout Tunnel); the Tunnel's standalone special operation and campaign Mission 10 share the same script, and finishing either marks Mission 10 complete. Missions 2–9 and 11–24 are data-driven chains of objectives (reach a place, collect items, survive a timer, choose a route, escape) defined in `js/field-missions.js`. **Limitation:** every mission plays on the same county road; they differ in objectives, locations, infected pressure (per difficulty, up to 12 infected) and atmosphere, not in unique long-road maps. After a successful debrief, **Next Mission** opens the next briefing (hidden after Mission 24 or if the next mission is locked). Tunnel: drive south to the entrance, follow the amber lamps through the radio outage, investigate the relay, then return to the vehicle and reach the far exit.
+
+Field missions score 1,000 completion + 200 objective bonus + time bonus (the lesser of 300 and the mission's par seconds, minus elapsed seconds) + 2 × remaining health %. Grades use the same thresholds.
 
 ## Mission debrief and scoring
 
