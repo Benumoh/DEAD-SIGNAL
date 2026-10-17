@@ -1,6 +1,6 @@
 # DEAD SIGNAL
 
-A static third-person zombie-survival driving game built with Three.js. Choose the original rescue mission or investigate the signal inside the Blackout Tunnel.
+A static third-person zombie-survival driving game built with Three.js. Start the Rescue a Friend campaign or take the existing Blackout Tunnel as a standalone operation.
 
 The existing stylized 3D scene now uses deterministic procedural asphalt and ground textures, instanced roadside growth and debris, more detailed abandoned vehicles, atmospheric fog, shadowed lighting, and vehicle headlight/brake feedback. The player and infected have lightweight limb motion. The title screen and cover use original locally authored artwork; no external textures, models, or runtime asset downloads are required.
 
@@ -27,14 +27,30 @@ To regenerate the original 1600×1000 cover artwork on Windows PowerShell, run:
 - **Space** — brake while driving
 - **E** — enter/exit the vehicle or rescue the survivor
 - **Right mouse drag** — rotate the on-foot camera
+- **Esc / P** or the **PAUSE** button — pause. Resuming (button, Enter, Esc or P) starts a 3-second countdown, and the paused time is excluded from the completion time. Losing window focus also pauses.
+- **Arrow keys / Enter / Esc** — move between buttons, select, and go back on the title, mission selection, briefing, pause and debrief screens
 
-The Rescue Run car starts near the survivor. Drive north along the marked highway to the service station, park, leave the vehicle and approach the survivor. Interact, return to the car and drive south to the marked escape point.
+The title background is `assets/menu-bg.jpg`.
 
-**The Blackout Tunnel** is available from the title screen. Drive south to the tunnel entrance, follow its amber emergency lamps through the temporary radio outage, investigate the relay when its signal is located, then return to the vehicle and reach the far exit. The rescue mission remains available from the same menu.
+### Mobile and touch
+
+Touch mode turns on automatically on touch devices (and on the first touch, or with `?touch=1` in the URL):
+
+- **Left stick** — walk or drive (up/down = W/S, left/right = A/D)
+- **E / BRK / RUN buttons** — interact, brake, and toggle run
+- **One-finger drag** on the scene — rotate the on-foot camera
+- **PAUSE** button — pause; resuming uses the same 3-second countdown
+- **On-screen menu pad (◀ ▲ ▼ ▶ OK BACK)** on the title, selection, briefing, pause and debrief screens, mirroring the arrow keys, Enter and Esc
+
+Touch input feeds the same key set the keyboard uses (`js/touch.js`), so no gameplay code is duplicated.
+
+Select **START MISSION** to open the campaign list and briefing. Mission 1, **Rescue a Friend**, is the first playable campaign mission. The Rescue Run car starts near the survivor. Drive north along the marked highway to the service station, park, leave the vehicle and approach the survivor. Interact, return to the car and drive south to the marked escape point.
+
+The 24-mission campaign registry presents six chapters, mission briefings, objectives, locations, difficulty, and prerequisites. Only implemented campaign missions can be launched. Future campaign entries remain visibly locked or marked as in development. The already playable **Blackout Tunnel** is currently a standalone special operation; it is not counted as campaign Mission 2 or as campaign completion progress. Drive south to the tunnel entrance, follow its amber emergency lamps through the temporary radio outage, investigate the relay when its signal is located, then return to the vehicle and reach the far exit.
 
 ## Mission debrief and scoring
 
-Start from the title screen, then complete the rescue route to see the Mission Debrief. It shows the completed run's mission name, score, elapsed time, rescue outcome and grade. Replay resets the mission, timer, score inputs, survivor, player health, vehicle, infected and temporary HUD state without reloading the page. The main menu pauses gameplay; Field Records remains available there.
+Start from the title screen, select a playable operation, review its briefing, and confirm to launch. Complete the rescue route to see the Mission Debrief. It shows the completed run's mission name, score, elapsed time, rescue outcome and grade. Replay resets the mission, timer, score inputs, survivor, player health, vehicle, infected and temporary HUD state without reloading the page. The main menu pauses gameplay; Field Records remains available during gameplay.
 
 Each mission score is calculated once when its final escape objective is completed:
 
@@ -46,7 +62,7 @@ Each mission score is calculated once when its final escape objective is complet
 
 The grade uses the final score: **S ≥ 1,650**, **A ≥ 1,500**, **B ≥ 1,400**, otherwise **C**. Health is the existing player health value; the game has no vehicle-damage statistic. Each completion stores a frozen result snapshot, and each run can award and submit only once.
 
-The start.ng integration exposes the existing global leaderboard rather than mission-specific records, so scores from either mission use that same documented platform score contract and board. Campaign results are retained by mission in page memory only; they are not persisted after a reload.
+Campaign completion IDs are saved in browser local storage and unlock the next campaign entry; run scores and debrief snapshots are not persisted locally. Local campaign progress is separate from start.ng identity and scores. Replaying a mission does not clear prior campaign completion.
 
 ## start.ng
 
@@ -97,7 +113,7 @@ tests/missions.test.js
 npm test
 ```
 
-The automated tests verify mission order, score components, grade thresholds, replay reset behavior, immutable run results, and per-run score-submission guards. Use the manual checklist below for browser-only gameplay.
+The automated tests verify mission order, the 24-entry registry, local progression persistence, score components, grade thresholds, replay reset behavior, immutable run results, and per-run score-submission guards. Use the manual checklist below for browser-only gameplay.
 
 ## Manual gameplay checks
 

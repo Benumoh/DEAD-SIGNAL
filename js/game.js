@@ -1,6 +1,13 @@
 import * as THREE from '../assets/vendor/three.module.js';
 import { Infected } from './infected.js';
-import { CampaignProgress, MISSION_IDS, MissionController, MISSION_PHASES } from './missions.js';
+import {
+  CAMPAIGN_MISSIONS,
+  CampaignProgress,
+  MISSION_IDS,
+  MissionController,
+  MISSION_PHASES,
+  SPECIAL_OPERATIONS,
+} from './missions.js';
 import { Player } from './player.js';
 import { StartNgIntegration } from './startng-integration.js';
 import { UI } from './ui.js';
@@ -100,6 +107,9 @@ export class Game {
     this.interactionRequested = false;
     this.elapsed = 0;
     this.runActive = false;
+    this.paused = false;
+    this.resumeCountdown = 0;
+    this.pauseStartedAt = 0;
     this.runSequence = 0;
     this.runId = null;
     this.radioIndex = 0;
@@ -180,8 +190,30 @@ export class Game {
     requestAnimationFrame(this._frame);
   }
 
-  _startMission(missionId = MISSION_IDS.RESCUE_RUN) {
+  _openMissionSelection() {
+    this.ui.showMissionSelection(
+      CAMPAIGN_MISSIONS,
+      SPECIAL_OPERATIONS,
+      this.campaignProgress,
+      (mission) => {
+        this.selectedMissionId = mission.id;
+        this.ui.showMissionBriefing(
+          mission,
+          () => this._startMission(mission.id),
+          () => this._openMissionSelection(),
+        );
+      },
+    );
+  }
+
+  _startMission(missionId) {
+    const playableMissionIds = [MISSION_IDS.RESCUE_RUN, MISSION_IDS.BLACKOUT_TUNNEL];
+    if (this.runActive || !playableMissionIds.includes(missionId)) return false;
     this.selectedMissionId = missionId;
+    this.paused = false;
+    this.resumeCountdown = 0;
+    this.ui.hidePause();
+    this.ui.hideCountdown();
     this.keys.clear();
     this.dragging = false;
     this.interactionRequested = false;
@@ -217,7 +249,7 @@ export class Game {
     this.ui.resetRun();
     this.mission.reset(Date.now(), missionId);
     if (tunnelMission) {
-      this.ui.setMissionLabel('BLACKOUT TUNNEL // 02');
+      this.ui.setMissionLabel('BLACKOUT TUNNEL // SPECIAL');
       this.ui.setMissionLocation('BLACKOUT TUNNEL');
       this.ui.setRadioMessage('“Evacuation checkpoint beyond the old tunnel. Come in, survivor.”');
     }
@@ -226,6 +258,7 @@ export class Game {
     this.ui.hideEnd();
     this.ui.hideMenu();
     this._placeCamera(1);
+    return true;
   }
 
   _buildWorld() {
@@ -655,7 +688,69 @@ export class Game {
     this.scene.add(beam);
   }
 
+  _returnToMenu() {
+    this.runActive = false;
+    this.paused = false;
+    this.resumeCountdown = 0;
+    this.keys.clear();
+    this.dragging = false;
+    this.driving = false;
+    this.elapsed = 0;
+    this.selectedMissionId = MISSION_IDS.RESCUE_RUN;
+    this.tunnelGroup.visible = false;
+    this.relayDevice.visible = false;
+    this.relayMarker.visible = false;
+    this.infected.active = false;
+    this.infected.group.visible = false;
+    for (const infected of this.tunnelInfected) {
+      infected.active = false;
+      infected.group.visible = false;
+    }
+    this.survivor.visible = true;
+    this.survivorMarker.visible = true;
+    this.ui.resetRun();
+    this.ui.hideEnd();
+    this.ui.hidePause();
+    this.ui.hideCountdown();
+    this.ui.showMenu();
+  }
+
+  _pause() {
+    if (!this.runActive || this.paused) return;
+    this.paused = true;
+    this.resumeCountdown = 0;
+    this.pauseStartedAt = Date.now();
+    this.keys.clear();
+    this.dragging = false;
+    this.interactionRequested = false;
+    this.ui.showPause();
+  }
+
+  _beginResume() {
+    if (!this.paused || this.resumeCountdown > 0) return;
+    this.resumeCountdown = 3;
+    this.ui.hidePause();
+    this.ui.showCountdown(3);
+  }
+
+  _cancelResume() {
+    if (!this.paused || this.resumeCountdown <= 0) return;
+    this.resumeCountdown = 0;
+    this.ui.hideCountdown();
+    this.ui.showPause();
+  }
+
+  _finishResume() {
+    // Keep the wall-clock based completion time from counting the paused period.
+    this.mission.startedAt += Date.now() - this.pauseStartedAt;
+    this.paused = false;
+    this.resumeCountdown = 0;
+    this.ui.hideCountdown();
+    this.ui.setPauseButtonVisible(true);
+  }
+
   _bindEvents() {
+    this.ui.showMenu();
     addEventListener('resize', this._onResize);
     addEventListener('keydown', this._onKeyDown);
     addEventListener('keyup', this._onKeyUp);
@@ -664,30 +759,12 @@ export class Game {
     this.canvas.addEventListener('pointerdown', this._onPointerDown);
     addEventListener('pointerup', this._onPointerUp);
     addEventListener('pointermove', this._onPointerMove);
-    document.getElementById('start-button').addEventListener('click', () => this._startMission());
-    document.getElementById('mission-2-button').addEventListener('click', () => this._startMission(MISSION_IDS.BLACKOUT_TUNNEL));
+    document.getElementById('start-button').addEventListener('click', () => this._openMissionSelection());
     document.getElementById('replay-button').addEventListener('click', () => this._startMission(this.selectedMissionId));
-    document.getElementById('menu-button').addEventListener('click', () => {
-      this.runActive = false;
-      this.keys.clear();
-      this.driving = false;
-      this.elapsed = 0;
-      this.selectedMissionId = MISSION_IDS.RESCUE_RUN;
-      this.tunnelGroup.visible = false;
-      this.relayDevice.visible = false;
-      this.relayMarker.visible = false;
-      this.infected.active = false;
-      this.infected.group.visible = false;
-      for (const infected of this.tunnelInfected) {
-        infected.active = false;
-        infected.group.visible = false;
-      }
-      this.survivor.visible = true;
-      this.survivorMarker.visible = true;
-      this.ui.resetRun();
-      this.ui.hideEnd();
-      this.ui.showMenu();
-    });
+    document.getElementById('menu-button').addEventListener('click', () => this._returnToMenu());
+    document.getElementById('pause-menu-button').addEventListener('click', () => this._returnToMenu());
+    document.getElementById('pause-button').addEventListener('click', () => this._pause());
+    document.getElementById('resume-button').addEventListener('click', () => this._beginResume());
     document.getElementById('leaderboard-button').addEventListener('click', () => this.platform.showLeaderboard());
     document.getElementById('close-leaderboard').addEventListener('click', () => this.ui.closeLeaderboard());
   }
@@ -904,10 +981,16 @@ export class Game {
 
   _frame = (timestamp) => {
     if (this.disposed) return;
-    const delta = Math.min(0.04, (timestamp - this.lastTimestamp) / 1000);
+    const realDelta = Math.max(0, (timestamp - this.lastTimestamp) / 1000);
+    const delta = Math.min(0.04, realDelta);
     this.lastTimestamp = timestamp;
+    if (this.paused && this.resumeCountdown > 0) {
+      this.resumeCountdown -= realDelta;
+      if (this.resumeCountdown <= 0) this._finishResume();
+      else this.ui.showCountdown(Math.ceil(this.resumeCountdown));
+    }
     const terminal = this.mission.phase === MISSION_PHASES.COMPLETE || this.mission.phase === MISSION_PHASES.FAILED;
-    if (this.runActive && !terminal) {
+    if (this.runActive && !terminal && !this.paused) {
       this.elapsed += delta;
       if (this.interactionRequested) this._interact();
       if (this.driving) {
@@ -941,7 +1024,7 @@ export class Game {
     this._placeCamera(delta);
     this.ui.setVehicleState(this.driving, this.driving ? this.vehicle.speedMph : 0);
     this.ui.setTime(this.runActive || terminal ? this.elapsed : 0);
-    if (this.runActive && this.mission.missionId === MISSION_IDS.RESCUE_RUN) {
+    if (this.runActive && !this.paused && this.mission.missionId === MISSION_IDS.RESCUE_RUN) {
       this.radioTimer += delta;
       if (this.radioTimer > 38) {
         this.radioTimer = 0;
@@ -958,10 +1041,31 @@ export class Game {
   _onResize = () => this._resize();
 
   _onKeyDown = (event) => {
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+    const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+    if (['Space', ...navigationKeys].includes(event.code)) event.preventDefault();
+    if (!document.getElementById('leaderboard-screen').hidden) {
+      if (event.code === 'Escape') this.ui.closeLeaderboard();
+      return;
+    }
+    if ((event.code === 'Escape' || event.code === 'KeyP') && !event.repeat) {
+      if (this.runActive) {
+        if (!this.paused) this._pause();
+        else if (this.resumeCountdown > 0) this._cancelResume();
+        else this._beginResume();
+        return;
+      }
+      if (event.code === 'Escape') {
+        const back = ['mission-briefing-screen', 'mission-selection-screen']
+          .find((id) => !document.getElementById(id).hidden);
+        if (back) {
+          document.getElementById(back === 'mission-briefing-screen' ? 'briefing-back-button' : 'selection-back-button').click();
+          return;
+        }
+      }
+    }
+    if (navigationKeys.includes(event.code) && this.ui.navigateScreens(event.code)) return;
+    if (!this.runActive || this.paused) return;
     if (event.code === 'KeyE' && !event.repeat) this.interactionRequested = true;
-    if (event.code === 'Escape' && !document.getElementById('leaderboard-screen').hidden) this.ui.closeLeaderboard();
-    if (!this.runActive) return;
     this.keys.add(event.code);
   };
 
@@ -969,15 +1073,16 @@ export class Game {
   _onBlur = () => {
     this.keys.clear();
     this.dragging = false;
+    this._pause();
   };
   _onContextMenu = (event) => event.preventDefault();
   _onPointerDown = (event) => {
-    if (this.runActive && event.button === 2) this.dragging = true;
+    if (this.runActive && !this.paused && event.button === 2) this.dragging = true;
   };
   _onPointerUp = () => {
     this.dragging = false;
   };
   _onPointerMove = (event) => {
-    if (this.runActive && this.dragging && !this.driving) this.cameraYaw -= event.movementX * 0.004;
+    if (this.runActive && !this.paused && this.dragging && !this.driving) this.cameraYaw -= event.movementX * 0.004;
   };
 }

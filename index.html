@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#111513">
     <meta name="description" content="A third-person zombie-survival campaign. Rescue the survivor or investigate the blackout tunnel.">
     <title>DEAD SIGNAL — Survival Campaign</title>
@@ -55,18 +55,86 @@
         <span>RIGHT-DRAG LOOK</span>
       </aside>
 
-      <button class="board-button" id="leaderboard-button" type="button">FIELD RECORDS</button>
+      <button class="pause-button" id="pause-button" type="button" aria-label="Pause game" hidden>PAUSE <kbd>ESC</kbd></button>
+      <button class="board-button" id="leaderboard-button" type="button" hidden>FIELD RECORDS</button>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <div class="touch-controls" id="touch-controls" hidden>
+        <div class="touch-stick" id="touch-stick" aria-label="Movement stick"><span class="touch-knob" id="touch-knob"></span></div>
+        <div class="touch-actions">
+          <button type="button" tabindex="-1" data-touch-key="KeyE" aria-label="Interact">E<small>ACT</small></button>
+          <button type="button" tabindex="-1" data-touch-key="Space" aria-label="Brake">BRK<small>BRAKE</small></button>
+          <button type="button" tabindex="-1" data-touch-key="ShiftLeft" data-toggle="true" aria-label="Run">RUN<small>TOGGLE</small></button>
+        </div>
+      </div>
+
+      <nav class="menu-nav" id="menu-nav" aria-label="Menu navigation" hidden>
+        <button type="button" tabindex="-1" data-nav="ArrowLeft" aria-label="Previous">◀</button>
+        <button type="button" tabindex="-1" data-nav="ArrowUp" aria-label="Up">▲</button>
+        <button type="button" tabindex="-1" data-nav="ArrowDown" aria-label="Down">▼</button>
+        <button type="button" tabindex="-1" data-nav="ArrowRight" aria-label="Next">▶</button>
+        <button type="button" tabindex="-1" data-nav="Enter" class="nav-ok">OK</button>
+        <button type="button" tabindex="-1" data-nav="Escape" class="nav-back">BACK</button>
+      </nav>
 
       <section class="screen" id="menu-screen">
         <div class="screen-card menu-card">
-          <p class="eyebrow">COUNTY ROAD // FIELD OPERATIONS</p>
+          <p class="eyebrow">A SURVIVAL CAMPAIGN</p>
           <h2>DEAD SIGNAL</h2>
-          <p>Choose a run. Find the survivor or follow the signal into the blackout tunnel.</p>
+          <p>The roads are gone quiet. Follow the calls that still come through.</p>
           <button id="start-button" type="button">START MISSION</button>
-          <button class="menu-secondary" id="mission-2-button" type="button">MISSION 2 // THE BLACKOUT TUNNEL</button>
+          <p class="nav-hint">ARROW KEYS NAVIGATE // ENTER SELECT // ESC BACK</p>
         </div>
       </section>
+
+      <section class="screen" id="mission-selection-screen" hidden aria-labelledby="selection-title">
+        <div class="screen-card selection-card">
+          <p class="eyebrow">CAMPAIGN // SIX CHAPTERS</p>
+          <h2 id="selection-title">SELECT MISSION</h2>
+          <p>Complete missions to unlock the next operation. Campaign completion is saved on this device; start.ng scores remain separate.</p>
+          <div id="campaign-mission-list" class="mission-list"></div>
+          <section class="special-operations">
+            <p class="eyebrow">SPECIAL OPERATIONS</p>
+            <div id="special-mission-list" class="mission-list"></div>
+          </section>
+          <button class="secondary-action" id="selection-back-button" type="button">BACK TO TITLE</button>
+        </div>
+      </section>
+
+      <section class="screen" id="mission-briefing-screen" hidden aria-labelledby="briefing-title">
+        <div class="screen-card briefing-card">
+          <p class="eyebrow" id="briefing-chapter"></p>
+          <h2 id="briefing-title"></h2>
+          <p id="briefing-description"></p>
+          <dl class="briefing-details">
+            <div><dt>DIFFICULTY</dt><dd id="briefing-difficulty"></dd></div>
+            <div><dt>LOCATION</dt><dd id="briefing-environment"></dd></div>
+            <div><dt>PRIMARY OBJECTIVE</dt><dd id="briefing-objective"></dd></div>
+          </dl>
+          <div class="debrief-actions">
+            <button class="secondary-action" id="briefing-back-button" type="button">BACK TO MISSIONS</button>
+            <button id="briefing-start-button" type="button">BEGIN MISSION</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="pause-screen" hidden aria-labelledby="pause-title">
+        <div class="screen-card pause-card">
+          <p class="eyebrow">GAME PAUSED</p>
+          <h2 id="pause-title">PAUSED</h2>
+          <p>The mission clock is stopped. Resuming starts a 3-second countdown.</p>
+          <div class="debrief-actions">
+            <button id="resume-button" type="button">RESUME</button>
+            <button class="secondary-action" id="pause-menu-button" type="button">RETURN TO MAIN MENU</button>
+          </div>
+          <p class="nav-hint">ARROW KEYS NAVIGATE // ENTER SELECT // ESC RESUME</p>
+        </div>
+      </section>
+
+      <div class="countdown" id="resume-countdown" hidden aria-live="assertive">
+        <span id="countdown-number">3</span>
+        <small>GET READY</small>
+      </div>
 
       <section class="screen" id="end-screen" hidden>
         <div class="screen-card debrief-card">

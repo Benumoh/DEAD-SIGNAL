@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CAMPAIGN_MISSIONS,
   CampaignProgress,
   gradeForScore,
   MissionController,
   MISSION_IDS,
   MISSION_PHASES,
+  SPECIAL_OPERATIONS,
 } from '../js/missions.js';
 
 test('rescue run advances only through the required objective order', () => {
@@ -143,6 +145,54 @@ test('campaign keeps each mission result when another mission completes', () => 
   assert.equal(campaign.get(MISSION_IDS.RESCUE_RUN), rescueResult);
   assert.equal(campaign.get(MISSION_IDS.BLACKOUT_TUNNEL), tunnelResult);
   assert.equal(campaign.get('unknown'), null);
+});
+
+test('campaign registry contains 24 ordered missions and a separate tunnel operation', () => {
+  const campaign = new CampaignProgress(null);
+  assert.equal(CAMPAIGN_MISSIONS.length, 24);
+  assert.equal(CAMPAIGN_MISSIONS[0].id, MISSION_IDS.RESCUE_RUN);
+  assert.equal(CAMPAIGN_MISSIONS[0].implemented, true);
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[0].id), 'available');
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[1].id), 'locked');
+  assert.equal(CAMPAIGN_MISSIONS[9].title, 'Blackout Tunnel');
+  assert.notEqual(CAMPAIGN_MISSIONS[9].id, MISSION_IDS.BLACKOUT_TUNNEL);
+  assert.equal(SPECIAL_OPERATIONS[0].id, MISSION_IDS.BLACKOUT_TUNNEL);
+  assert.equal(SPECIAL_OPERATIONS[0].implemented, true);
+});
+
+test('campaign completion persists locally and unlocks only the next mission', () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const campaign = new CampaignProgress(storage);
+  const rescue = new MissionController({ startedAt: 0 });
+  rescue.reachStation();
+  rescue.rescueSurvivor();
+  rescue.enterVehicle();
+  campaign.record(rescue.reachEscape(10_000, 90));
+
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[0].id), 'completed');
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[1].id), 'unlocked');
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[2].id), 'locked');
+
+  const restored = new CampaignProgress(storage);
+  assert.equal(restored.stateFor(CAMPAIGN_MISSIONS[0].id), 'completed');
+  assert.equal(restored.stateFor(CAMPAIGN_MISSIONS[1].id), 'unlocked');
+  assert.equal(restored.get(MISSION_IDS.RESCUE_RUN), null);
+});
+
+test('standalone mission completion does not unlock campaign missions', () => {
+  const campaign = new CampaignProgress(null);
+  const tunnel = new MissionController({ startedAt: 0, missionId: MISSION_IDS.BLACKOUT_TUNNEL });
+  tunnel.reachTunnelEntrance();
+  tunnel.enterTunnel();
+  tunnel.reachSignalDevice();
+  tunnel.investigateRelay();
+  campaign.record(tunnel.reachTunnelExit(10_000, 100));
+
+  assert.equal(campaign.stateFor(CAMPAIGN_MISSIONS[1].id), 'locked');
 });
 
 test('replaying Blackout Tunnel resets its phases, clue and score snapshot', () => {
